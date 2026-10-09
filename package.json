@@ -24,11 +24,25 @@
     "lib/client.js",
     "cordis.patch.yml",
     "stickers.json",
-    "meme",
-    "stickers",
-    "tools",
+    "Background",
+    "meme/*.png",
+    "meme/*.jpeg",
+    "tools/*.mjs",
     "test",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "theme",
+    "skin",
+    "persona"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/berhbro/dsh-cyrene-theme.git"
+  },
   "license": "MIT"
 }

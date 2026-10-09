@@ -2,6 +2,10 @@
 
 把 DSH Web GUI 换成《崩坏：星穹铁道》昔涟（Cyrene）的粉白渐变毛玻璃主题，把 agent 的人格设定改成昔涟——人格提示词可以直接在侧边栏里改——让她在该有情绪的时候贴一张自己的表情包，把新会话欢迎页的鱼换成她、顺手把输入框的默认提示换成她的话，还能把整页背景换成 `Background/` 里放的那几张图（可以在面板里开关、选起点、自动轮换）。
 
+> **English** — A pink-and-white frosted-glass skin for the DSH Web GUI, themed after Cyrene from *Honkai: Star Rail*. It also rewrites the agent persona (editable from the sidebar), teaches the agent to post Cyrene reaction stickers, replaces the new-session hero fish with her, and adds a full-page background picker (enable / pick / rotate / fade the images in `Background/`).
+>
+> Install: `dsh plugin --profile web add github:berhbro/dsh-cyrene-theme` — then reload the page. UI text is Chinese.
+
 ## 能力
 
 | 部分 | 实现 |
@@ -17,9 +21,19 @@
 
 ## 安装
 
+从本地目录（开发时就地改）：
+
 ```powershell
 dsh plugin --profile desktop add D:\dshWorkPlace\dsh-cyrene-theme
 ```
+
+从 GitHub（`--profile` 换成你自己的 profile 名，Web 端一般是 `web`，桌面端是 `desktop`）：
+
+```powershell
+dsh plugin --profile desktop add github:berhbro/dsh-cyrene-theme
+```
+
+装完刷新一次页面：客户端半的 bundle 是页面加载时读的，不刷新还是旧的。（`files` 里已包含 `Background/`、`meme/`、`stickers.json`，所以从 GitHub 装也带素材。）
 
 卸载：`dsh plugin --profile desktop remove dsh-cyrene-theme`。
 
@@ -146,7 +160,7 @@ body[data-dsh-cyrene] img[alt^="昔涟·"]{max-width:var(--cyre-sticker-size);ma
 
 `rotate` 打开后，客户端半按 `interval` 秒在页面里换下一张，**不写状态文件**——`current` 是你点的那张起点，轮换只管"这一会儿看哪张"。所以刷新页面后一定回到你选的那张，而不是上次轮换停在哪。「下一张」同理，只是当场翻页。`dim` 越大色纱越厚：浅色主题偏粉白、深色主题偏紫夜，免得正文压在亮部或暗部上读不动。
 
-两张自带素材正好一明一暗：`1782050250138.jpeg` 是浅色主视觉（配浅色主题），`1782050471900.jpeg` 是深蓝夜景（配深色主题）。
+两张自带素材正好一明一暗：`the-longest-night.jpeg` 是浅色主视觉（配浅色主题），`night-reading.jpeg` 是深蓝夜景（配深色主题）。文件名只是排序用的，想换成自己的图就直接丢进 `Background/`（认 `png/jpg/jpeg/gif/webp/avif`，单张上限 24 MB），刷新页面就能在缩略图条里看到。
 
 ## 对话界面微调
 
@@ -264,14 +278,14 @@ dsh-cyrene-theme/
   cordis.patch.yml      插件树插入声明
   lib/index.js          宿主半（ESM）：系统提示词 section + /cyrene/state 路由 + 落盘 + 表情包清单/字节路由 + 表情包上传/删除 + /cyrene/hero + 背景清单/字节路由
   lib/client.js         客户端半（手写 CJS bundle，无需构建）：样式表 + body 作用域 + 三个槽位 + 界面微调 + 整页背景层与对话内容的可读处理 + 设置面板 + 独立的表情包管理器页
-  Background/           整页背景图素材（用户自己丢图进来；宿主启动时扫一次，页面每次带 reload=1 强制重扫）
+  Background/           整页背景图素材（自带 the-longest-night.jpeg 浅色 / night-reading.jpeg 深蓝夜景；宿主启动时扫一次，页面每次带 reload=1 强制重扫）
   stickers.json         表情包清单（id / 名称 / 时机 / 文件），换图只改这里
   meme/                 表情包素材（11 张，jpeg/png，文件名＝表情名字）
   stickers-custom/      面板里自添加的表情包（运行时数据，已 gitignore；不在仓库里）
-  stickers/             探路用占位贴纸（cyrene-probe.png，可删）
+  LICENSE               MIT
+  docs/screenshots/     给插件市场用的截图放这儿（现在是空目录 + 说明，只在仓库里，不进 npm 包）
   tools/rename-stickers.mjs  按清单把素材文件改名（`--dry` 先看，失败整批回滚）
   tools/show-stickers.mjs    把清单渲染成人眼可读的「【表情包】」段
-  tools/make-probe.py        生成探路占位贴纸的 Pillow 脚本（可删）
   tools/hero-preview.py      画出欢迎页艺术字的候选字体对照图（预览用，不参与运行）
   tools/hero-mock.py         画出「贴纸 + 艺术字」整行的大小对照图（预览用）
   tools/hero-cutout.py       把白底方形素材抠成透明 PNG（给没有透明通道的素材用）
