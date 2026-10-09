@@ -55,6 +55,13 @@ class El {
     this._text = ''
     this.parent = null
     this._html = ''
+    // 贴图大小是写到 body.style 上的自定义属性；桩里记下来供断言。
+    this.style = {
+      _props: {},
+      setProperty(name, value) { this._props[name] = String(value) },
+      removeProperty(name) { delete this._props[name] },
+      getPropertyValue(name) { return this._props[name] ?? '' },
+    }
   }
   set textContent(v) {
     this._text = String(v)
@@ -143,6 +150,13 @@ async function bootstrap(response, options = {}) {
     confirm: () => true,
   }
   globalThis.document = makeDoc()
+  // 上传走 FileReader.readAsDataURL；桩只要把预定好的 data URL 递回去。
+  globalThis.FileReader = class {
+    readAsDataURL() {
+      this.result = options.dataUrl ?? 'data:image/png;base64,AAAA'
+      if (typeof this.onload === 'function') this.onload()
+    }
+  }
   globalThis.fetch = async (url, init = {}) => {
     const call = { url: String(url), method: init.method ?? 'GET', body: init.body }
     calls.push(call)
@@ -228,6 +242,20 @@ const RESPONSE = {
 
 console.log(`bundle = ${CLIENT.pathname}\n`)
 
+/** 背景清单信封：两张图，路径都必须是宿主半的字节路由。 */
+const BACKGROUNDS = {
+  ok: true,
+  value: {
+    error: null,
+    folder: 'Background',
+    items: [
+      { id: 'a.jpeg', name: 'a.jpeg', type: 'image/jpeg', bytes: 10, url: '/cyrene/background/a.jpeg' },
+      { id: 'b.jpeg', name: 'b.jpeg', type: 'image/jpeg', bytes: 10, url: '/cyrene/background/b.jpeg' },
+    ],
+  },
+}
+const isBackgrounds = (call) => call.url.includes('/cyrene/backgrounds')
+
 // ── 1. 包装 + 导出
 const boot = await bootstrap(RESPONSE)
 ok('loader 用包名注册', boot.spec?.id === PACKAGE_ID, boot.spec?.id)
@@ -240,8 +268,8 @@ boot.exports.apply(box.ctx)
 await tick()
 
 ok(
-  '注册了 5 个 effect（样式 / 作用域 / 释放 loader 误标的样式 / 焦点同步 / 活页面取证）',
-  box.effects.length === 5 && box.effects[0].label.endsWith('stylesheet') && box.effects[3].label.endsWith('resync on focus') && box.effects[4].label.endsWith('dom report'),
+  '注册了 6 个 effect（样式 / 作用域 / 释放 loader 误标的样式 / 焦点同步 / 背景层 / 活页面取证）',
+  box.effects.length === 6 && box.effects[0].label.endsWith('stylesheet') && box.effects[3].label.endsWith('resync on focus') && box.effects[4].label.endsWith('background layer') && box.effects[5].label.endsWith('dom report'),
   box.effects.map((e) => e.label),
 )
 const style = globalThis.document.head.children[0]
@@ -278,6 +306,40 @@ ok(
 ok(
   'html 画布有不透明兜底（桌面窗口是原生 acrylic）',
   /html:has\(body\[data-dsh-cyrene\]\[data-cyrene-skin="on"\]\)/.test(cssText) && /background-color:#fff8fc/.test(cssText),
+)
+// 回归保护 3：输入框卡片的毛玻璃必须画在静态伪元素上，不能画在卡片自己身上。
+// 卡片的发送键外面套着一个没开 portal 的 Tooltip，气泡是 position:fixed 且靠在
+// ResizeObserver 里反复「适应」视口换边；卡片一旦自己带 backdrop-filter，就成了
+// fixed 后代的包含块，气泡的视口定位被破坏 —— 鼠标停在发送键上（delayMs 500）时
+// 界面就会抖/闪。这条断言把那个坑钉住。
+const blurSelectors = [...cssText.matchAll(/([^{}]+)\{([^{}]*backdrop-filter[^{}]*)\}/g)]
+  .flatMap((m) => m[1].split(',').map((s) => s.trim()))
+const cardBlur = blurSelectors.filter((s) => s.includes('[data-composer-card]'))
+ok(
+  '卡片的毛玻璃只画在 ::before 上（卡片自己不能成为 fixed 后代的包含块）',
+  cardBlur.length > 0 && cardBlur.every((s) => /\[data-composer-card\]::before/.test(s)),
+  cardBlur,
+)
+const groupBlur = blurSelectors.filter((s) => /data-slot="sidebar|data-dockkit-pane|data-dockkit-float|role="dialog"|data-radix-popper|data-shell-overlay/.test(s))
+ok(
+  '毛玻璃组齐全，且已经不再挂诊断闸门（面板里的诊断开关取消了）',
+  groupBlur.length >= 7 && groupBlur.every((s) => !s.includes('data-cyre-blur')),
+  groupBlur,
+)
+ok(
+  '贴图大小：CSS 变量 + 按 alt 认自己的贴图（不带主题开关，关了主题也该生效）',
+  /body\[data-dsh-cyrene\]\{[^}]*--cyre-sticker-size:96px/.test(cssText) &&
+    /body\[data-dsh-cyrene\] img\[alt\^="昔涟·"\]\{[^}]*max-width:var\(--cyre-sticker-size\)[^}]*max-height:var\(--cyre-sticker-size\)/.test(cssText),
+)
+// 管理器是单独一页：外层覆盖层封顶 + overflow:hidden，里面那层才滚动；
+// 卡片锁 min-width:0 / max-width:100% / overflow:hidden，长名字也撑不出格子。
+ok(
+  '表情包管理器不会让素材超出页面范围（外层封顶、内层滚动、卡片锁宽）',
+  /\.cyre-overlay\{[^}]*max-height:[^}]*overflow:hidden/.test(cssText) &&
+    /\.cyre-overlay--wide\{[^}]*width:min\(/.test(cssText) &&
+    /\.cyre-manager-scroll\{[^}]*flex:1 1 auto[^}]*min-height:0[^}]*overflow-y:auto[^}]*overflow-x:hidden/.test(cssText) &&
+    /\.cyre-sticker\{[^}]*min-width:0[^}]*max-width:100%[^}]*overflow:hidden/.test(cssText) &&
+    /\.cyre-sticker img\{[^}]*max-width:100%/.test(cssText),
 )
 ok('body 打了 data-dsh-cyrene', globalThis.document.body.attrs['data-dsh-cyrene'] === '', globalThis.document.body.attrs)
 
@@ -389,6 +451,9 @@ ok('保存成功后状态位给出反馈', /已保存/.test(statusEl.textContent
 let stateGetCount = 0
 const bootS = await bootstrap(async (call) => {
   if (call.url.endsWith('/cyrene/report')) return { status: 200, payload: { ok: true, value: { at: 'now' } } }
+  // 背景清单要立刻应答：它不能参与下面这个「第 2 个 GET 起变慢」的计数，
+  // 否则被拖慢的会变成 state GET，断言时状态位还没写上就被 absorb 清掉。
+  if (isBackgrounds(call)) return { status: 200, payload: BACKGROUNDS }
   if (call.method === 'POST') return { status: 409, payload: STALE }
   stateGetCount += 1
   if (stateGetCount > 1) await slow(45)
@@ -444,14 +509,37 @@ ok(
   bootK.calls.some((c) => c.method === 'GET' && c.url.includes('/cyrene/stickers')),
   bootK.calls.map((c) => c.url),
 )
-const gridK = editorK.querySelector('[data-role="sticker-grid"]')
-const cardsK = gridK.descendants().filter((el) => el.className === 'cyre-sticker')
-ok('预览网格按清单渲染卡片（不重复堆）', cardsK.length === 2, cardsK.length)
+const entryK = editorK.querySelector('[data-role="open-stickers"]')
+const summaryK = editorK.querySelector('[data-role="sticker-summary"]')
+ok(
+  '编辑器里只剩一个入口：一句概况 + 「打开管理器」按钮，没有内嵌网格/滑杆',
+  entryK !== null && summaryK !== null &&
+    editorK.querySelector('[data-role="sticker-grid"]') === null &&
+    editorK.querySelector('[data-role="sticker-size"]') === null &&
+    editorK.querySelector('[data-role="blur"]') === null,
+  [entryK !== null, summaryK?.textContent],
+)
+ok('入口那句概况跟上清单', /2 张/.test(summaryK.textContent), summaryK.textContent)
+
+editorK.dispatch('click', { target: entryK })
+const overlayK = globalThis.document.body.descendants().find((el) => el.className === 'cyre-overlay cyre-overlay--wide')
+ok('点入口打开管理器页（挂在 body 上的覆盖层）', overlayK !== undefined && overlayK !== null, globalThis.document.body.descendants().map((el) => el.className))
+const managerK = overlayK.querySelector('[data-role="sticker-grid"]')
+const cardsK = managerK.descendants().filter((el) => el.className === 'cyre-sticker')
+ok('管理器网格按清单渲染卡片（不重复堆）', cardsK.length === 2, cardsK.length)
 const imgK = cardsK[0].descendants().find((el) => el.tagName === 'img')
 ok(
   '图片指向宿主半的字节路由，不是 file:// 本地路径',
   typeof imgK?.src === 'string' && imgK.src.includes('/cyrene/sticker/happy') && !imgK.src.startsWith('file:'),
   imgK?.src,
+)
+// 关掉管理器：覆盖层必须真的从 body 上摘掉（不然会越开越多）。
+const closeK = overlayK.querySelector('[data-role="close"]') ?? overlayK.descendants().find((el) => el.tagName === 'button' && el.attrs['aria-label'] === '关闭')
+closeK.dispatch('click')
+ok(
+  '关掉后覆盖层从 body 上移除',
+  !globalThis.document.body.descendants().some((el) => el.className === 'cyre-overlay cyre-overlay--wide'),
+  globalThis.document.body.descendants().map((el) => el.className),
 )
 const stickersBoxK = editorK.querySelector('[data-role="stickers"]')
 ok('表情包开关默认按宿主值打开', stickersBoxK.checked === true, stickersBoxK.checked)
@@ -477,6 +565,320 @@ ok(
   '宿主说关着时开关回显为关',
   editorK2.querySelector('[data-role="stickers"]').checked === false,
   editorK2.querySelector('[data-role="stickers"]').checked,
+)
+
+// ── 6c. 表情包管理器：一个入口 → 单独一页（大小滑杆 + 自添加 + 删除）
+const STICKERS_CUSTOM = {
+  ok: true,
+  value: {
+    ...STICKERS.value,
+    items: [
+      ...STICKERS.value.items,
+      { id: 'u1', label: '自定的', when: '测试用', custom: true, type: 'image/png', bytes: 10, url: '/cyrene/sticker/u1' },
+    ],
+  },
+}
+const bootM = await bootstrap((call) => {
+  if (call.url.endsWith('/cyrene/report')) return { status: 200, payload: { ok: true, value: { at: 'now' } } }
+  if (isBackgrounds(call)) return { status: 200, payload: BACKGROUNDS }
+  if (call.method === 'POST' && call.url.endsWith('/cyrene/stickers/remove')) {
+    return { status: 200, payload: { ok: true, value: { state: { ...REV7.value, rev: 10 }, stickers: STICKERS.value } } }
+  }
+  if (call.method === 'POST' && call.url.endsWith('/cyrene/stickers')) {
+    return { status: 200, payload: { ok: true, value: { state: { ...REV7.value, rev: 9 }, stickers: STICKERS_CUSTOM.value } } }
+  }
+  if (call.url.includes('/cyrene/stickers')) return { status: 200, payload: STICKERS_CUSTOM }
+  if (call.method === 'POST') return { status: 200, payload: { ok: true, value: { ...REV7.value, rev: 8 } } }
+  return { status: 200, payload: REV7 }
+}, { autoHost: true })
+const boxM = makeCtx()
+bootM.exports.apply(boxM.ctx)
+await tick()
+boxM.registered.find((r) => r.registration.id === 'cyrene-theme').component()
+await tick()
+const editorM = bootM.refs[0].current.children[0]
+
+ok(
+  '诊断开关已经从编辑器里取消（也不在管理器里）',
+  editorM.querySelector('[data-role="blur"]') === null &&
+    !editorM.descendants().some((el) => el.attrs['data-role'] === 'blur'),
+  editorM.descendants().map((el) => el.attrs['data-role']).filter(Boolean),
+)
+
+const entryM = editorM.querySelector('[data-role="open-stickers"]')
+editorM.dispatch('click', { target: entryM })
+const overlayM = globalThis.document.body.descendants().find((el) => el.className === 'cyre-overlay cyre-overlay--wide')
+ok('入口按钮打开管理器页', overlayM !== undefined && overlayM !== null, globalThis.document.body.descendants().map((el) => el.className))
+const managerRoot = overlayM.descendants().find((el) => el.className === 'cyre-manager')
+
+const sizeRange = overlayM.querySelector('[data-role="sticker-size"]')
+const sizeLabel = overlayM.querySelector('[data-role="sticker-size-label"]')
+ok(
+  '大小滑杆按宿主值回显',
+  sizeRange?.value === '96' && sizeLabel?.textContent === '96px',
+  [sizeRange?.value, sizeLabel?.textContent],
+)
+sizeRange.value = '160'
+sizeRange.dispatch('input')
+ok(
+  '拖滑杆时先就地改 CSS 变量（还没落盘）',
+  globalThis.document.body.style.getPropertyValue('--cyre-sticker-size') === '160px',
+  globalThis.document.body.style.getPropertyValue('--cyre-sticker-size'),
+)
+const beforeSize = bootM.calls.length
+sizeRange.dispatch('change')
+await tick()
+const sizePost = bootM.calls.slice(beforeSize).find((c) => c.method === 'POST' && c.url.endsWith('/cyrene/state'))
+const sizePatch = sizePost ? JSON.parse(sizePost.body) : null
+ok(
+  '松手才提交 stickerSize，且只发这一个字段',
+  sizePatch?.stickerSize === 160 && sizePatch?.rev === 7 && Object.keys(sizePatch).length === 2,
+  sizePatch,
+)
+
+const newFile = overlayM.querySelector('[data-role="new-file"]')
+const addButton = overlayM.querySelector('[data-role="add"]')
+const newLabel = overlayM.querySelector('[data-role="new-label"]')
+const newWhen = overlayM.querySelector('[data-role="new-when"]')
+ok('没选文件时「添加」是禁用的', addButton?.disabled === true, addButton?.disabled)
+newFile.files = [{ name: 'my.png', type: 'image/png' }]
+newFile.dispatch('change')
+ok('选了文件就能点「添加」', addButton?.disabled === false, addButton?.disabled)
+newLabel.value = '自定的'
+newWhen.value = '测试用'
+const beforeAdd = bootM.calls.length
+addButton.dispatch('click')
+await tick()
+await tick()
+await tick()
+const addPost = bootM.calls.slice(beforeAdd).find((c) => c.method === 'POST' && c.url.endsWith('/cyrene/stickers'))
+const addBody = addPost ? JSON.parse(addPost.body) : null
+ok(
+  '上传走宿主半的 /cyrene/stickers，带 rev / 名字 / 时机 / data URL',
+  addBody?.rev === 8 && /^data:image\/png;base64,/.test(addBody?.data ?? '') &&
+    addBody?.label === '自定的' && addBody?.when === '测试用' && addBody?.name === 'my.png',
+  addBody && { ...addBody, data: String(addBody.data).slice(0, 24) + '…' },
+)
+
+const gridM = overlayM.querySelector('[data-role="sticker-grid"]')
+const customCard = gridM.descendants().find((el) => el.className === 'cyre-sticker' && el.descendants().some((d) => d.attrs['data-role'] === 'del-sticker'))
+const delBtn = customCard ? customCard.descendants().find((d) => d.attrs['data-role'] === 'del-sticker') : null
+ok(
+  '上传成功后网格里多出那张卡，且只有自添加的带删除按钮',
+  gridM.descendants().filter((el) => el.className === 'cyre-sticker').length === 3 &&
+    delBtn !== null && delBtn !== undefined && delBtn.attrs['data-id'] === 'u1',
+  gridM.descendants().map((el) => [el.className, el.attrs['data-role']]),
+)
+const beforeDel = bootM.calls.length
+managerRoot.dispatch('click', { target: delBtn })
+await tick()
+const delPost = bootM.calls.slice(beforeDel).find((c) => c.method === 'POST' && c.url.endsWith('/cyrene/stickers/remove'))
+const delBody = delPost ? JSON.parse(delPost.body) : null
+ok('删除走 /cyrene/stickers/remove 并带上 id 与 rev', delBody?.id === 'u1' && delBody?.rev === 9, delBody)
+// 管理器里的改动要回流到编辑器那一行概况（两处共用同一份 state + watchers）。
+ok(
+  '管理器里删完，编辑器入口的概况也跟着变',
+  /2 张/.test(editorM.querySelector('[data-role="sticker-summary"]').textContent),
+  editorM.querySelector('[data-role="sticker-summary"]').textContent,
+)
+
+// ── 6d. 背景：清单来自 Background/，控制板管开关 / 选图 / 轮换 / 浓度
+// 这一块最容易出事的不是"图能不能显示"，而是"会不会碍着用"：
+// 图层必须是最底下一层且不吃鼠标，对话列要有一层自己的纸面，
+// 而且这层纸面不能是毛玻璃（输入框卡片在滚动容器里，会重新触发浮层闪烁）。
+const BG_STATE = { enabled: true, current: '', rotate: false, interval: 90, dim: 0.6 }
+const REVB = { ok: true, value: { ...REV7.value, background: BG_STATE } }
+const bootB = await bootstrap((call) => {
+  if (call.url.endsWith('/cyrene/report')) return { status: 200, payload: { ok: true, value: { at: 'now' } } }
+  if (isBackgrounds(call)) return { status: 200, payload: BACKGROUNDS }
+  if (call.url.includes('/cyrene/stickers')) return { status: 200, payload: STICKERS }
+  if (call.method === 'POST') {
+    const patch = JSON.parse(call.body)
+    // 宿主半的 POST /cyrene/state 直接回一份新状态（不是嵌在 value.state 里）。
+    return {
+      status: 200,
+      payload: { ok: true, value: { ...REVB.value, rev: 8, background: { ...BG_STATE, ...(patch.background ?? null) } } },
+    }
+  }
+  return { status: 200, payload: REVB }
+}, { autoHost: true, captureIntervals: true })
+const boxB = makeCtx()
+bootB.exports.apply(boxB.ctx)
+await tick()
+
+const docB = bootB.doc
+const layerB = docB.body.descendants().find((el) => el.className === 'cyre-bg')
+const imgsB = layerB === undefined ? [] : layerB.children.filter((el) => el.className === 'cyre-bg-img')
+const activeImage = () => {
+  const img = imgsB.find((el) => el.attrs['data-active'] === '1')
+  return img === undefined ? '' : String(img.style.backgroundImage)
+}
+ok(
+  '背景层先铺好两层图 + 一层色纱（换图靠淡入淡出，不重建 DOM），并标了 aria-hidden',
+  imgsB.length === 2 && layerB.children.some((el) => el.className === 'cyre-bg-veil') && layerB.attrs['aria-hidden'] === 'true',
+  layerB?.children.map((el) => el.className),
+)
+ok(
+  '图层是最底下一层、不吃鼠标（position:fixed / z-index:-1 / pointer-events:none 都写在 CSS 里）',
+  /\.cyre-bg\{[^}]*position:fixed/.test(cssText) &&
+    /\.cyre-bg\{[^}]*z-index:-1/.test(cssText) &&
+    /\.cyre-bg\{[^}]*pointer-events:none/.test(cssText),
+)
+ok(
+  '整列对话区不再刷白：滚动容器身上没有底色 / 圆角那套"纸面"（照片才透得上来）',
+  !/\[data-cyre-bg="on"\] \[data-conversation-scroll\]\{[^}]*background:/.test(cssText) &&
+    !/\[data-cyre-bg="on"\] \[data-conversation-scroll\]\{[^}]*border-radius/.test(cssText),
+)
+ok(
+  '只对"对话本身"做处理：有图时气泡底色调厚 + 正文一圈淡光晕',
+  /\[data-cyre-bg="on"\]\{[^}]*--dsw-specific-bubble:/.test(cssText) &&
+    /\[data-cyre-bg="on"\] \[data-conversation-scroll\] :is\(p,li,/.test(cssText) &&
+    /text-shadow:/.test(cssText),
+)
+ok(
+  '这层处理没有用毛玻璃（滚动容器一旦成为 fixed 子元素的包含块，发送键的浮层会重新闪）',
+  !/\[data-conversation-scroll\][^{]*\{[^}]*backdrop-filter/.test(cssText),
+)
+ok(
+  '拉清单时带 reload=1（往 Background/ 丢新图后刷新就能看到）',
+  bootB.calls.some((c) => c.method === 'GET' && isBackgrounds(c) && c.url.includes('reload=1')),
+  bootB.calls.map((c) => c.url),
+)
+ok(
+  'body 上写着浓度变量与总开关（页面级，不受编辑器是否打开影响）',
+  docB.body.style.getPropertyValue('--cyre-bg-dim') === '0.6' && docB.body.attrs['data-cyre-bg'] === 'on',
+  [docB.body.style.getPropertyValue('--cyre-bg-dim'), docB.body.attrs['data-cyre-bg']],
+)
+
+boxB.registered.find((r) => r.registration.id === 'cyrene-theme').component()
+await tick()
+const editorB = bootB.refs[0].current.children[0]
+const stripB = editorB.querySelector('[data-role="bg-strip"]')
+const thumbsB = stripB.descendants().filter((el) => el.className === 'cyre-bg-thumb')
+ok('缩略图条按清单渲染（每张一个按钮）', thumbsB.length === 2, thumbsB.length)
+const thumbImgB = thumbsB[0]?.descendants().find((el) => el.tagName === 'img')
+ok(
+  '缩略图走宿主半的字节路由，不是 file:// 本地路径',
+  thumbImgB !== undefined && String(thumbImgB.src).includes('/cyrene/background/a.jpeg') && !String(thumbImgB.src).startsWith('file:'),
+  thumbImgB?.src,
+)
+ok(
+  'current 为空＝用清单第一张，那张是亮着的',
+  thumbsB[0].attrs['data-on'] === '1' && thumbsB[1].attrs['data-on'] === undefined,
+  thumbsB.map((el) => el.attrs['data-on']),
+)
+ok('概况行跟着清单', /2 张/.test(editorB.querySelector('[data-role="bg-summary"]').textContent), editorB.querySelector('[data-role="bg-summary"]').textContent)
+ok(
+  '当前那张真的铺在图层上',
+  activeImage().includes('/cyrene/background/a.jpeg'),
+  activeImage(),
+)
+
+const bgModeImage = editorB.querySelector('[data-role="bg-mode-image"]')
+const bgModePlain = editorB.querySelector('[data-role="bg-mode-plain"]')
+ok(
+  '风格是二选一：进来时「背景图」亮着、「简约（无图）」没亮，root 上写着当前档',
+  bgModeImage.attrs['data-on'] === '1' && bgModePlain.attrs['data-on'] === undefined &&
+    editorB.attrs['data-bg-mode'] === 'image',
+  [bgModeImage.attrs['data-on'], bgModePlain.attrs['data-on'], editorB.attrs['data-bg-mode']],
+)
+const bgPostOf = (from) => bootB.calls.slice(from).find((c) => c.method === 'POST' && c.url.endsWith('/cyrene/state'))
+const bgPatchOf = (from) => {
+  const call = bgPostOf(from)
+  return call === undefined ? null : JSON.parse(call.body)
+}
+
+const beforeBg = bootB.calls.length
+editorB.dispatch('click', { target: bgModePlain })
+await tick()
+const offPatch = bgPatchOf(beforeBg)
+ok(
+  '选「简约」只发 background.enabled 一个键（带 rev，不回写别的字段）',
+  offPatch?.rev === 7 && offPatch?.background?.enabled === false &&
+    Object.keys(offPatch.background).length === 1 && !('persona' in offPatch) && !('theme' in offPatch),
+  offPatch,
+)
+ok('简约档下整层直接 display:none，页面回到没加背景图之前那种样子', docB.body.attrs['data-cyre-bg'] === 'off', docB.body.attrs['data-cyre-bg'])
+ok(
+  '高亮与档位跟着切，跟图片有关的控件淡下去',
+  bgModePlain.attrs['data-on'] === '1' && bgModeImage.attrs['data-on'] === undefined &&
+    editorB.attrs['data-bg-mode'] === 'plain' && /\[data-bg-mode="plain"\] \.cyre-bg-only/.test(cssText),
+  editorB.attrs['data-bg-mode'],
+)
+
+const beforeSameMode = bootB.calls.length
+editorB.dispatch('click', { target: bgModePlain })
+await tick()
+ok('同一档再点一次不重复写宿主（只是重画一遍）', bgPostOf(beforeSameMode) === undefined, bootB.calls.slice(beforeSameMode).map((c) => c.url))
+
+editorB.dispatch('click', { target: bgModeImage })
+await tick()
+ok(
+  '切回「背景图」又铺回原样（不用刷新页面）',
+  docB.body.attrs['data-cyre-bg'] === 'on' && editorB.attrs['data-bg-mode'] === 'image' &&
+    activeImage().includes('/cyrene/background/a.jpeg'),
+  [docB.body.attrs['data-cyre-bg'], activeImage()],
+)
+
+const beforePick = bootB.calls.length
+editorB.dispatch('click', { target: thumbsB[1] })
+await tick()
+const pickPatch = bgPatchOf(beforePick)
+ok(
+  '点缩略图把 current 交给宿主（锚点由用户定，轮换不会推着它走）',
+  pickPatch?.background?.current === 'b.jpeg' && Object.keys(pickPatch.background).length === 1,
+  pickPatch,
+)
+ok(
+  '选中的那张亮起来，图层也换成它',
+  thumbsB[1].attrs['data-on'] === '1' && thumbsB[0].attrs['data-on'] === undefined &&
+    activeImage().includes('/cyrene/background/b.jpeg'),
+  [thumbsB.map((el) => el.attrs['data-on']), activeImage()],
+)
+
+const beforeNext = bootB.calls.length
+editorB.dispatch('click', { target: editorB.querySelector('[data-role="bg-next"]') })
+await tick()
+ok(
+  '「下一张」只在页面里换图，不写宿主（下一张不等于改起点）',
+  bgPostOf(beforeNext) === undefined && activeImage().includes('/cyrene/background/a.jpeg'),
+  activeImage(),
+)
+
+const bgRotateBox = editorB.querySelector('[data-role="bg-rotate"]')
+bgRotateBox.checked = true
+bgRotateBox.dispatch('change')
+await tick()
+ok(
+  '打开自动轮换后多出一个定时任务（间隔取宿主给的 90s）',
+  bootB.intervals.length === 2,
+  bootB.intervals.length,
+)
+bootB.intervals[1]()
+await tick()
+ok(
+  '轮换到下一张：图层与缩略图高亮一起走，宿主那边一个字节都没动',
+  activeImage().includes('/cyrene/background/b.jpeg') && thumbsB[1].attrs['data-on'] === '1' &&
+    !bootB.calls.slice(beforeNext).some((c) => c.method === 'POST' && String(c.body).includes('"current"')),
+  activeImage(),
+)
+const beforeDim = bootB.calls.length
+const bgDimRange = editorB.querySelector('[data-role="bg-dim"]')
+bgDimRange.value = '0.35'
+bgDimRange.dispatch('input')
+ok(
+  '拖浓度滑杆时就地预览（只改 CSS 变量，还没落盘）',
+  docB.body.style.getPropertyValue('--cyre-bg-dim') === '0.35' && bgPostOf(beforeDim) === undefined &&
+    editorB.querySelector('[data-role="bg-dim-label"]').textContent === '35%',
+  docB.body.style.getPropertyValue('--cyre-bg-dim'),
+)
+bgDimRange.dispatch('change')
+await tick()
+const dimPatch = bgPatchOf(beforeDim)
+ok(
+  '松手才把浓度交给宿主',
+  dimPatch?.background?.dim === 0.35 && Object.keys(dimPatch.background).length === 1,
+  dimPatch,
 )
 
 // ── 7. 取证扫描的挑选逻辑：谁带 backdrop-filter、谁是大面积半透明

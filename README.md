@@ -1,6 +1,6 @@
 # dsh-cyrene-theme · 昔涟主题
 
-把 DSH Web GUI 换成《崩坏：星穹铁道》昔涟（Cyrene）的粉白渐变毛玻璃主题，把 agent 的人格设定改成昔涟——人格提示词可以直接在侧边栏里改——让她在该有情绪的时候贴一张自己的表情包，并把新会话欢迎页的鱼换成她、顺手把输入框的默认提示换成她的话。
+把 DSH Web GUI 换成《崩坏：星穹铁道》昔涟（Cyrene）的粉白渐变毛玻璃主题，把 agent 的人格设定改成昔涟——人格提示词可以直接在侧边栏里改——让她在该有情绪的时候贴一张自己的表情包，把新会话欢迎页的鱼换成她、顺手把输入框的默认提示换成她的话，还能把整页背景换成 `Background/` 里放的那几张图（可以在面板里开关、选起点、自动轮换）。
 
 ## 能力
 
@@ -10,8 +10,10 @@
 | 人格设定 | 宿主半注册 `systemPrompt.section({ name: 'cyrene:persona', order: 部署人格前缀 order + 100 })`——运行版 `dsh-system-prompt` 的键是 `DEPLOYMENT_PERSONA_PREFIX`(0)，旧版是 `DEPLOYMENT_PERSONA`(0)，两个都试；都取不到就落到 `100`，仍然排在通用人格之后、工具策略 `PLAN_POLICY`(500) 之前。每次保存后重挂这个 section，所以**改完立刻对之后每一轮对话（含新对话）生效**，不需要重载插件。section 名用本包自己的 `cyrene:persona`，绝不占用保留名 `deployment:persona`（那是 `@deepseek-ai/dsh-persona` 的位置，全局重名注册会直接失败）。 |
 | 侧边栏编辑 | 客户端半向 `sidebar.footer.action` 注册「✦ 昔涟」按钮（点开浮动面板），并额外向 `settings.section` 注册一整页「昔涟 · 主题」，两处用的是同一个编辑器。 |
 | 表情包 | 素材放在包内 `meme/` 下（文件名就是表情名字），`stickers.json` 是清单（id / 名称 / 什么时候用 / 文件）。宿主半把清单折算成一段附在人格之后的「【表情包】」说明——**每张图的绝对路径整行写好**，模型直接照抄（路径里带括号、空格或非 ASCII 时，自己拼很容易抄错）——并开两条只读路由：`GET /cyrene/stickers`（清单，支持 `?reload=1`）与 `GET /cyrene/sticker/<id>`（图片字节，带 `ETag`/304）。设置页里能看到缩略图与「允许发表情包」开关；关掉后这段说明就从系统提示词里消失。 |
+| 表情包管理 | 面板里只有一行**入口**（「✦ 表情包管理　N 张」+「打开管理器」），点开是一整页**管理器**（挂在 `body` 上的覆盖层，Escape 或右上「关闭」退出）：里面**加图**（选文件 → 转成 data URL → `POST /cyrene/stickers`）、**删图**（只删自己加的，`POST /cyrene/stickers/remove`）、**调大小**（48–240px 滑杆，落进 `state.stickerSize`）。页面本身封顶 + 内层滚动，素材不会撑出管理器范围。自添加的图落在 `stickers-custom/`（gitignore，属运行时数据），条目存在状态文件的 `customStickers` 里，与包内清单合并成同一份「【表情包】」说明——**加完立刻能贴**，不用重载插件行。 |
+| 背景图 | `Background/` 文件夹是唯一真相：宿主半扫描它（`GET /cyrene/backgrounds`，支持 `?reload=1`）、按文件名把字节发出去（`GET /cyrene/background/<文件名>`，与表情包同一套响应头）。客户端半在 `body` 上挂一层 `.cyre-bg`（`position:fixed;inset:0;z-index:-1;pointer-events:none`）：两层图交叉淡入 + 一层色纱，有图时铺满视口；**整列对话区不刷白**，照片直接透上来，只把用户气泡的底色调厚、再给正文一圈淡光晕。控制板里「背景图 / 简约（无图）」二选一、点缩略图选起点、开自动轮换（15–3600 秒）、拖浓度（0.2–0.85）。详见「背景图」。 |
 | 持久化 | 宿主半自带 fenced 路由 `/cyrene/state`（GET 读 / POST 写），落盘到 `$DSH_HOME/cyrene-theme.json`（默认 `~/.dsh/cyrene-theme.json`）。写入走**乐观并发**：写请求必须带上 GET 拿到的 `rev`，缺 `rev`（旧版客户端半 / 手搓脚本）→ 400 `client-outdated`，`rev` 过期 → 409 `stale` —— 没刷新的旧页面不可能再把别处的改动盖回去。 |
-| 对话界面 | **新会话欢迎页**：客户端半占用 `conversation.hero.brand.mark` 这个单占位槽（官方 brand 包不占它，默认渲染才是那个动态鱼），改成昔涟的圆形头像 + 一句粉白渐变艺术字欢迎语；头像字节走宿主半的 `GET /cyrene/hero`，图片路径来自 `state.hero.image`。**输入框占位提示**：原生那句写在 `[data-composer-placeholder]` 的文本节点里、没有 i18n 覆盖的口子，所以用纯 CSS（把原字染透明 + 自己的 `::after` 写一句「有问题？有任务？来找昔涟♪」）替换，不动 DOM、不碰宿主词典。详见「对话界面微调」。 |
+| 对话界面 | **新会话欢迎页**：客户端半占用 `conversation.hero.brand.mark` 这个单占位槽（官方 brand 包不占它，默认渲染才是那个动态鱼），改成昔涟的整张贴纸（带 alpha 的 Q 版立绘，不画边框底盘）+ 一句粉白渐变艺术字欢迎语，整行是纯装饰（点不响、选不中、拖不动）；贴纸字节走宿主半的 `GET /cyrene/hero`，图片路径来自 `state.hero.image`。**输入框占位提示**：原生那句写在 `[data-composer-placeholder]` 的文本节点里、没有 i18n 覆盖的口子，所以用纯 CSS（把原字染透明 + 自己的 `::after` 写一句「有问题？有任务？来找昔涟♪」）替换，不动 DOM、不碰宿主词典。**悬浮毛玻璃**：输入框卡片的 `backdrop-filter` 画在 `::before` 上而不是卡片本身，否则会破坏发送键那个未开 portal 的 fixed Tooltip 的定位、鼠标停上去时界面闪烁（详见「已知坑」）。详见「对话界面微调」。 |
 
 ## 安装
 
@@ -26,18 +28,22 @@ dsh plugin --profile desktop add D:\dshWorkPlace\dsh-cyrene-theme
 1. 安装后刷新一次 DSH 页面——客户端半是新 bundle，不刷新不会加载。
 2. 侧边栏最下方、设置按钮旁边点「✦ 昔涟」打开人格设定面板（Esc 或右上角 ✕ 关闭）。
 3. 也可以在「设置 → 昔涟 · 主题」里打开同一份编辑器。
-4. 编辑框里写的就是人格底稿；点「保存设定」后，之后每一轮对话都会以这段设定回答。三个开关分别是**昔涟人格**、**粉白毛玻璃主题**、**允许发表情包**（表情包开关旁就是缩略图预览，"重新载入"会把清单重新拉一遍）；
-5. 「恢复默认」把默认底稿填回编辑框（还要点一次保存才生效），「重新载入」丢弃未保存的改动。
+4. 编辑框里写的就是人格底稿；点「保存设定」后，之后每一轮对话都会以这段设定回答。三个开关分别是**昔涟人格**、**粉白毛玻璃主题**、**允许发表情包**（"重新载入"会把表情包清单重新拉一遍）。
+5. 下面一行「✦ 表情包管理」是唯一的入口，点「打开管理器」跳出一整页：**大小**滑杆拖动时先就地预览、松手才落盘；**添加**一行填「名字 / 什么时候贴」再选张图（png / jpg / gif / webp / avif，单张 ≤8MB）即可；自己加的那些卡片角上有「✕ 删除」，包内的那 11 张删不了（改 `stickers.json` 才是它们的入口）。
+6. 再下面一行是背景：先是「背景图 / 简约（无图）」二选一——选**简约**就回到没加背景图之前那种样子（渐变底 + 素着的对话列），再右边是「自动轮换」；下面两个滑杆是**间隔**（15–600 秒）与**淡化**（0.2–0.85，越大照片越淡、正文越清楚）；「下一张」只是当场翻页（不写状态文件），点缩略图才把那张定为起点。图片丢进 `Background/`，加删图刷新页面即可认。
+7. 「恢复默认」把默认底稿填回编辑框（还要点一次保存才生效），「重新载入」丢弃未保存的改动（表情包清单与背景清单一起重拉）。
 
 ### 改完之后什么时候生效
 
 | 改的是什么 | 生效方式 |
 | --- | --- |
-| 人格底稿 / 两个开关（在面板里保存） | **立刻**，之后每一轮对话都按新设定；旧对话也一样 |
+| 人格底稿 / 开关 / 背景设定（在面板里保存） | **立刻**，之后每一轮对话都按新设定；旧对话也一样 |
 | `lib/client.js`（样式表、面板本身） | 刷新页面（F5）——客户端半是页面加载时读的 bundle |
 | `lib/index.js`（路由、section 逻辑） | 重载插件行或重启 DSH——宿主半在 DSH 启动时载入后一直缓存 |
 | `cordis.patch.yml` | 重载插件行或重启 DSH |
 | `hero.image` / 欢迎语（状态文件或 `DEFAULT_HERO`） | 重载插件行或重启 DSH（宿主半启动时读一次） |
+| `Background/` 里加图 / 删图 / 改名 | **刷新页面即可**——页面每次都会带 `reload=1` 让宿主重扫那个目录，不需要动宿主半 |
+| 手工改状态文件里的 `background` | 重载插件行或重启 DSH |
 
 本插件以 `link:` 方式装在工作区里，所以**改文件不需要重装**，但上面这张表仍然成立。
 如果保存时看到「这个页面还是旧版本，请按 F5 刷新后重试」，就是页面里的客户端半比宿主的 `rev` 旧了一代：刷新一下即可。
@@ -46,14 +52,20 @@ dsh plugin --profile desktop add D:\dshWorkPlace\dsh-cyrene-theme
 
 ```json
 { "persona": "……人格提示词……", "enabled": true, "theme": true, "stickers": true,
-  "hero": { "image": "meme/IMG_20260612_155829.jpg", "title": "让昔涟来帮帮你吧🎵" }, "rev": 3 }
+  "stickerSize": 96, "customStickers": [],
+  "hero": { "image": "meme/俏皮眨眼.png", "title": "让昔涟来帮帮你吧🎵" },
+  "background": { "enabled": true, "current": "", "rotate": false, "interval": 90, "dim": 0.6 },
+  "rev": 3 }
 ```
 
 - `persona`：空字符串表示不注入人格。
 - `enabled`：人格总开关。
 - `theme`：粉白主题开关（关掉只留人格，UI 回到原样）。
 - `stickers`：表情包开关（关掉后那段「【表情包】」说明不注入）。
+- `stickerSize`：聊天里贴图的最大边长（px），落盘前夹在 48–320 之间。它**不跟主题开关走**——贴图大小是插件设定，关掉主题也照样生效。
+- `customStickers`：面板里自添加的表情包（`{ id, file, label, when }`，`file` 只是 `stickers-custom/` 下的文件名，越界或类型不认识的一律丢弃）。
 - `hero`：新会话欢迎页的**形象路径**（相对插件目录，只认包内的图片）与**欢迎语**。形象读不出来（文件不在 / 类型不认识 / 超过 8MB）时 `GET /cyrene/state` 里的 `hero.ready` 是 `false`，页面就只显示欢迎语、不挂坏图；改完要重载插件行或重启 DSH 才认（宿主半只在启动时读一次磁盘）。
+- `background`：整页背景。`enabled` 是总开关（还要求主题开关也是开着的），`current` 是起点文件名（**空字符串＝按目录顺序的第一张**；填的名字不在 `Background/` 清单里也不会出事，只是被当作没指定），`rotate` 是自动轮换，`interval` 是轮换间隔秒数（落盘前夹在 15–3600），`dim` 是色纱浓度（夹在 0.2–0.85，越大越淡）。非字符串、带 `/` `\` `..` 的 `current` 一律保持原样不写。
 - `rev`：写入版本号，每次成功写入 +1。手工编辑这个文件时把 `rev` 一起调大（或直接删掉这行）即可；留着小值会让还开着旧版本的页面写不进来（那正是它存在的意义）。
 
 出问题时最快的还原手段：删掉这个文件并重载插件行，人格回到内置默认、主题按默认值。
@@ -82,6 +94,59 @@ dsh plugin --profile desktop add D:\dshWorkPlace\dsh-cyrene-theme
 规矩也写在里面：**最多 `maxPerTurn` 张、只在情绪真的到了的时候贴、代码/命令/报错/技术结论旁边不贴、拿不准就不贴**，而且必须单独占一行（`dsh-client-ui-chat` 只把独立成行的图片渲染成预览，混在句子里的图片路径会原样显示）。
 
 图片本身由客户端半的预览网格与 `GET /cyrene/sticker/<id>` 提供：**页面是 http 来源，`file://` 的本地路径在页面里根本加载不出来**，所以缩略图必须走宿主半的字节路由（宿主半读磁盘、带 `Content-Type`/`Content-Length`/`ETag`）。而模型粘贴在回复里的那一行用的是**文件绝对路径**——那是聊天面板自己的 Markdown 图片解析（按"当前查看的工作区"解析本地路径），跟浏览器同源策略无关。
+
+### 面板里自己加表情包
+
+设置页那一行「✦ 表情包管理」只是个入口，点「打开管理器」会弹出一整页覆盖层（挂 `document.body` 上、Escape 或右上「关闭」退出；插件没有自己的路由，这是"跳转到对应页面"在本环境里的等价物）。页面里：填「名字 / 什么时候贴」→ 选文件 → 「添加」。上传路径是 `POST /cyrene/stickers`，body 是 `{ rev, name, label, when, data }`，`data` 是浏览器 `FileReader` 读出来的 `data:image/*;base64,…`：
+
+- 页面本身**不会让素材溢出去**：覆盖层 `max-height` + `overflow:hidden`、宽 `min(560px, calc(100vw - 48px))`；里面 `.cyre-manager-scroll` 才是滚动层（`flex:1 1 auto;min-height:0`）；卡片锁 `min-width:0;max-width:100%;overflow:hidden`，长名字只换行不撑格子。`test/client.smoke.mjs` 里有专门盯这条的正则断言。
+
+- 请求体上限放宽到 **12MB**（普通写入口还是 256KB），解码后超过 `MAX_ASSET_BYTES`（8MB）回 400 `too-large`；`data` 不是 data URL 回 400 `bad-image`；mime 与文件名后缀都不在 `png/jpg/jpeg/gif/webp/avif` 里回 400 `bad-type`。
+- 扩展名**优先信 data URL 里的 mime**（浏览器给的最准），认不出来才退回文件名后缀。
+- 成功时：写文件到 `stickers-custom/<id><ext>` → 条目推进 `state.customStickers` → `rev+1` 落盘 → 重新解析清单 → **重挂人格 section**，所以刚加的图这一轮就能贴。响应回 `{ state, stickers }` 两个快照，面板一次刷新到位。
+- 删除走 `POST /cyrene/stickers/remove`（body `{ rev, id }`），按 id 找条目、从磁盘 `rm` 文件、同样 `rev+1` 并重挂人格；id 认不出来（包括 `../../…` 这种写法）一律 404 `not-found`，不会碰到目录外的任何东西。
+- 自添加的图**不放 `$DSH_HOME`**：聊天里的贴图是 Markdown 图片，本地路径按"当前查看的工作区"解析，所以文件必须在工作区内读得到，才落在插件目录的 `stickers-custom/`（已 gitignore，属运行时数据）。
+
+### 贴图大小
+
+聊天里的贴图就是 Markdown 图片，DOM 是 `button[class*="_imageButton"] > img[class*="_image"]`，宿主自己那条 `[class*="_imageButton"] [class*="_image"]{max-width:min(100%,640px);max-height:360px}`。我们不跟它抢源码，而是**按 `alt` 认自己的图**：
+
+```css
+body[data-dsh-cyrene]{--cyre-sticker-size:96px}
+body[data-dsh-cyrene] img[alt^="昔涟·"]{max-width:var(--cyre-sticker-size);max-height:var(--cyre-sticker-size);width:auto;height:auto}
+```
+
+- 认 `alt` 而不是 `src`：`alt` 是「昔涟·<名字>」，由 Markdown 原样保留，`src` 会被宿主按工作区重写。特异度 (0,2,2) 高于宿主的 (0,2,0)，不需要 `!important`。
+- `--cyre-sticker-size` 由客户端半在 `applySkin()` 里按 `state.stickerSize` 写到 `body` 上；拖动滑杆时先就地改变量做预览、松手（`change`）才 `save({ stickerSize })`。
+- 这条规则**故意不带 `data-cyrene-skin`**：关掉主题也照样管大小。
+
+## 背景图
+
+素材就放在 `Background/`（包内目录，图自己丢进去就行）。宿主半把它当唯一真相：启动时扫一遍，另有 `GET /cyrene/backgrounds`（带 `?reload=1` 强制重扫）回清单、`GET /cyrene/background/<文件名>` 回字节——**只有清单里有的名字才发**，其余一律 404。它跟表情包共用同一套响应头（`ETag`/304、`Cache-Control: private, max-age=300`、`nosniff`），单张上限 24MB，扩展名按 `ASSET_TYPES` 认。
+
+### 叠了三层
+
+| 层 | 是什么 | 什么时候在 |
+| --- | --- | --- |
+| 渐变底 | `body::before`（粉白 / 紫夜渐变）+ `body::after`（顶部珠光） | 主题自带的，一直都在 |
+| `.cyre-bg` | 两层图片交叉淡入 + 一层色纱 | 有图时才铺满视口，没图整层 `display:none`，渐变照旧露出来 |
+| 对话内容 | 有图时把用户气泡的底色（`--dsw-specific-bubble`）调厚一点，再给正文（段落 / 列表 / 表格）一圈很淡的光晕 | 背景图开着时才挂上；**整列本身不刷白**，照片直接透上来 |
+
+`.cyre-bg` 是 `body` 的真实子元素，`position:fixed;inset:0;z-index:-1;pointer-events:none`：不占布局、不接指针，任何点击都到不了它；树序排在 `body::before` 之后，所以有图时它盖住渐变，`body::after` 那层珠光仍在最上面。
+
+三件事同时成立才会铺出来：**主题开关开着**、风格选的是「背景图」、`Background/` 里至少有一张能用的图。所以关掉主题就等于连同背景图一起收掉（渐变底回来），不用担心深色/浅色主题和背景图色调打架。
+
+### 对话区为什么不刷白、也不用毛玻璃
+
+早先的版本给 `[data-conversation-scroll]` 铺了一层 90% 的白纸来"把对话和背景分开"，结果照片基本看不见了——现在整列保持透明，只对**对话本身**做处理：有图时把用户气泡的底色调厚一点，再给正文一圈很淡的光晕（段落 / 列表 / 表格；预格式化的代码块自带深色底，不参与）。照片该看见就看见，字也压得住。
+
+另外，**绝不能给 `[data-conversation-scroll]` 加 `backdrop-filter`。** 输入框卡片是它的后代，而发送键那个 Tooltip 没开 portal、气泡是 `position:fixed`——滚动容器一旦因为 `backdrop-filter` 成为 fixed 后代的包含块，就会重新触发「鼠标停在发送键上界面闪烁」那个 bug。要是觉得照片太抢眼，把「淡化」往上拖——那层色纱才是真正管"照片有多淡"的旋钮。
+
+### 轮换只发生在页面里
+
+`rotate` 打开后，客户端半按 `interval` 秒在页面里换下一张，**不写状态文件**——`current` 是你点的那张起点，轮换只管"这一会儿看哪张"。所以刷新页面后一定回到你选的那张，而不是上次轮换停在哪。「下一张」同理，只是当场翻页。`dim` 越大色纱越厚：浅色主题偏粉白、深色主题偏紫夜，免得正文压在亮部或暗部上读不动。
+
+两张自带素材正好一明一暗：`1782050250138.jpeg` 是浅色主视觉（配浅色主题），`1782050471900.jpeg` 是深蓝夜景（配深色主题）。
 
 ## 对话界面微调
 
@@ -173,7 +238,9 @@ GET  /cyrene/report   # 读回最后一份报告（含上报时间）
 
 - **不要给 `[data-shell-overlay]` 加 `backdrop-filter`。** 它是 `@deepseek-ai/dsh-client-ui-layout` 里 AppFrame 的 overlayLayer（`.BynINW_overlayLayer{z-index:20;pointer-events:none;position:absolute;inset:0}`），**永远存在且铺满整帧**；给它加模糊，整个窗口都会跟着发糊。浮层要打毛玻璃就打它的直接子元素（`[data-shell-overlay] > *`）。`test/client.smoke.mjs` 里有专门盯这条的回归断言。
 - 桌面窗口是 Electron 的原生 acrylic 材质，它"拥有"窗口级的模糊。所以 `--dsw-alias-bg-base: transparent` 必须配一层不透明的画布底色，否则系统模糊会从整扇窗透出来。
+- **不要把 `backdrop-filter` 打在 `[data-composer-card]`（输入框卡片）本身上。** 发送键外面套着一个 `@deepseek-ai/dsh-client-ui-primitives` 的 `Tooltip`，它**没有开 `portal`**（别处如 `queue.save` 开了），气泡是 `position:fixed` 且要等 ResizeObserver 量到尺寸后才做视口适配。而按 CSS 规范，元素一旦有 `backdrop-filter` 就会成为 **fixed 后代的包含块**、同时形成层叠上下文——气泡的视口定位被破坏，适配逻辑就会反复换边，表现就是**鼠标停在发送键上时界面闪烁**（`delayMs:500`，正好对上"停留"）。要保留卡片的通透感，就把毛玻璃画在静态伪元素上：`[data-composer-card]{isolation:isolate}` + `[data-composer-card]::before{content:"";position:absolute;inset:0;z-index:-1;border-radius:inherit;backdrop-filter:blur(16px) saturate(160%)}`（宿主的 `.v1kfCW_panel:before` 就是这套写法）。`test/client.smoke.mjs` 里有断言专门盯"卡片自己身上不许出现 `backdrop-filter`"。
 - **不要给 `[data-sidebar-right-panel]` 加 `backdrop-filter`。** 它是 `@deepseek-ai/dsh-client-ui-sidebar-right` 里的右侧栏容器（`.OUqwTW_panel{pointer-events:none;flex-direction:column;min-width:0;display:flex;position:absolute;top:0;bottom:0;right:0}`）：自身没有背景，收起时只是把窗格 `[data-dockkit-host=dock]` 设成 `visibility:hidden`（**布局宽度仍在**）。给它加模糊，那块区域会一直保持模糊——表现就是"打开设置页后右半边发雾，关掉也不散"。毛玻璃要打在真正的窗格 `[data-dockkit-pane]` / `[data-dockkit-float]` 上（它们收起时不被绘制）。同样有回归断言盯着。
+- **不要给 `[data-conversation-scroll]` 加 `backdrop-filter`。** 同一个道理：输入框卡片就在这个滚动容器里面，而发送键那个 Tooltip 是它的后代且是 `position:fixed`——容器一变成包含块，就会重新触发上面那条"停在发送键上闪烁"。所以整页背景图开着时对话区**整列不刷白**，只把用户气泡的底色调厚、给正文一圈淡光晕。`test/client.smoke.mjs` 里有回归断言盯着这条。
 
 ## 自检
 
@@ -183,9 +250,9 @@ node test/client.smoke.mjs
 node test/contrast.mjs
 ```
 
-`host.smoke.mjs` 71 项断言，全部跑在临时目录里（脚本自己把 `DSH_HOME` 指过去，不碰真实的 `~/.dsh`）：section 名与 order 回退、默认底稿、`/cyrene/state` 的信封与响应头、落盘与跨"重启"读回、重挂 section 的 disposer 语义、`enabled=false` 与空白 persona、404、超过 256KB 的请求体，**rev 乐观并发**（缺 rev 400、过期 rev 409 且不改状态、成功写入 rev+1、重启后旧 rev 依然被拒、`lastWrite` 诊断记录被拒的尝试），**取证旁路**（`POST /cyrene/report` 存内存、`GET` 读回、超 128KB 400 拒收且不覆盖上一份、全程不碰 `rev`/状态/磁盘），**表情包**（清单解析出 11 项且都能取到字节、`Content-Type` 与长度对得上、缓存与 `nosniff` 头、未知 id 404、`stickers:false` 之后系统提示词里不再有「【表情包】」并落盘、再打开回来），以及**欢迎页形象**（`/cyrene/state` 里的 `hero` 四项、`GET /cyrene/hero` 回真图字节、缓存/nosniff/`ETag`、带对 `ETag` 回 304、改欢迎语立即生效且落盘、`../` 越界与不存在的文件都只是 `ready:false` 而不是 500、改回默认后重新就绪）。
+`host.smoke.mjs` 99 项断言，全部跑在临时目录里（脚本自己把 `DSH_HOME` 指过去，不碰真实的 `~/.dsh`）：section 名与 order 回退、默认底稿、`/cyrene/state` 的信封与响应头、落盘与跨"重启"读回、重挂 section 的 disposer 语义、`enabled=false` 与空白 persona、404、超过 256KB 的请求体，**rev 乐观并发**（缺 rev 400、过期 rev 409 且不改状态、成功写入 rev+1、重启后旧 rev 依然被拒、`lastWrite` 诊断记录被拒的尝试），**取证旁路**（`POST /cyrene/report` 存内存、`GET` 读回、超 128KB 400 拒收且不覆盖上一份、全程不碰 `rev`/状态/磁盘），**表情包**（清单解析出 11 项且都能取到字节、`Content-Type` 与长度对得上、缓存与 `nosniff` 头、未知 id 404、`stickers:false` 之后系统提示词里不再有「【表情包】」并落盘、再打开回来），以及**欢迎页形象**（`/cyrene/state` 里的 `hero` 四项、`GET /cyrene/hero` 回真图字节、缓存/nosniff/`ETag`、带对 `ETag` 回 304、改欢迎语立即生效且落盘、`../` 越界与不存在的文件都只是 `ready:false` 而不是 500、改回默认后重新就绪），以及**表情包管理**（新装的状态文件带 `stickerSize: 96` 与空 `customStickers`；上传成功回 `{state, stickers}` 两个快照、清单里那一项 `custom: true` 且 `label`/`when` 原样保留、新图能从 `/cyrene/sticker/<id>` 读回同样长度的字节、条目落盘、人格 section 立刻含新名字与时机；上传同样受 rev 闸门管、非 data URL 400 `bad-image`、类型不认识 400 `bad-type`、解码后超 8MB 400 `too-large` 且磁盘不留东西；`stickerSize` 9999→320 / 10→48 / 128.4→128 并落盘；删除后清单为空、文件也没了、人格附录不再提它；删不存在的 id（含 `../../etc/passwd` 这种写法）404 `not-found`），以及**背景图**（`/cyrene/state` 里的 `background` 五项默认值、清单回 `{ error, folder: 'Background', items }` 且每项 `url` 正好是 `/cyrene/background/<encodeURIComponent(id)>`、字节路由的长度/类型/缓存/`nosniff` 头、未知名字与 `..%2F..%2Fpackage.json` 都只是 404、脏值补丁被夹住或原样保留（`dim 5→0.85`、`interval 3→15`、`enabled:'no'` 不动、`current:'../outside.jpeg'` 不动）、正常补丁确实落盘、改回默认）。
 
-`client.smoke.mjs` 77 项断言，用最小 DOM / react / fetch 桩在 node 里把客户端 bundle 跑一遍：loader 注册与导出、5 个 effect、样式表注入与带 `data-plugin-css`、body 作用域与卸载还原、三个槽位的 name（含欢迎页单占位槽不带 id/order）、按宿主状态打 `data-cyrene-skin`、宿主不可达时仍能装上；**回归项：毛玻璃不落在整帧 overlay 层本身上、不落在右侧栏容器 `[data-sidebar-right-panel]` 上、只落在浮层的直接子元素与真正的窗格 `[data-dockkit-pane]`/`[data-dockkit-float]` 上、html 画布有不透明兜底**；**取证扫描的挑选逻辑**、**取证通道的自我修复**（宿主半还没有这条路由时开机照样上报、被 404 拒收后下一拍重试、内容没变就不重复上报）、**表情包预览**（按清单渲染卡片不重复堆、`img.src` 指向宿主半的字节路由而不是 `file://`、开关默认按宿主值、关掉只发自己那个字段）；**对话界面微调**（欢迎页的头像与艺术字规则、**头像是一整张贴纸：不画边框/底盘/圆角/遮罩、直接用素材自己的 alpha**、**整行纯装饰：`pointer-events:none` + `user-select:none` + `cursor:default`，`img` 另带 `-webkit-user-drag:none` 与 `draggable:false`**、藏掉内置文案的两种落点与官方「预览版」徽标、`:has()` 收成单列、艺术字的字栈以方正舒体打头且**收在无衬线**（同时断言样式表里不会出现行楷/楷体/`serif`）、粉 → 白渐变的确切色标与粉边、`prefers-reduced-motion`、占位提示的 `color:transparent` + `::after` 文案、**`::after` 必须 `position:absolute;left:0` 钉在容器左上角**且明写无衬线字栈、闸门只认"默认/欢迎页默认"两个前缀且没有无闸门的写法、状态类提示没被写进规则、以及欢迎页组件首帧真的渲染出指向 `/cyrene/hero` 的 `img`、音符合 `🎵` 被拆成单独 span、宿主说 `ready:false` 时不挂坏图）；并且**真的把设置页组件跑起来**驱动编辑器——开关改动只发自己那个字段（不再回写缓存快照）、保存按钮只提交改过的 persona、每次写入都带上宿主的 rev、收到 409 后自动重新载入并按宿主的值回正开关。
+`client.smoke.mjs` 121 项断言，用最小 DOM / react / fetch 桩在 node 里把客户端 bundle 跑一遍：loader 注册与导出、6 个 effect、样式表注入与带 `data-plugin-css`、body 作用域与卸载还原、三个槽位的 name（含欢迎页单占位槽不带 id/order）、按宿主状态打 `data-cyrene-skin`、宿主不可达时仍能装上；**回归项：毛玻璃不落在整帧 overlay 层本身上、不落在右侧栏容器 `[data-sidebar-right-panel]` 上、只落在浮层的直接子元素与真正的窗格 `[data-dockkit-pane]`/`[data-dockkit-float]` 上、html 画布有不透明兜底**；**取证扫描的挑选逻辑**、**取证通道的自我修复**（宿主半还没有这条路由时开机照样上报、被 404 拒收后下一拍重试、内容没变就不重复上报）、**表情包管理器**（编辑器里只剩一行入口：一句「N 张」概况 + 「打开管理器」按钮，内嵌网格/滑杆/诊断复选框都不在了；点入口弹出覆盖层再按清单渲染卡片、`img.src` 指向宿主半的字节路由而不是 `file://`、点「关闭」后覆盖层真的从 `body` 上摘掉、表情包开关默认按宿主值、关掉只发自己那个字段）；**对话界面微调**（欢迎页的头像与艺术字规则、**头像是一整张贴纸：不画边框/底盘/圆角/遮罩、直接用素材自己的 alpha**、**整行纯装饰：`pointer-events:none` + `user-select:none` + `cursor:default`，`img` 另带 `-webkit-user-drag:none` 与 `draggable:false`**、藏掉内置文案的两种落点与官方「预览版」徽标、`:has()` 收成单列、艺术字的字栈以方正舒体打头且**收在无衬线**（同时断言样式表里不会出现行楷/楷体/`serif`）、粉 → 白渐变的确切色标与粉边、`prefers-reduced-motion`、占位提示的 `color:transparent` + `::after` 文案、**`::after` 必须 `position:absolute;left:0` 钉在容器左上角**且明写无衬线字栈、闸门只认"默认/欢迎页默认"两个前缀且没有无闸门的写法、状态类提示没被写进规则、以及欢迎页组件首帧真的渲染出指向 `/cyrene/hero` 的 `img`、音符合 `🎵` 被拆成单独 span、宿主说 `ready:false` 时不挂坏图）；并且**真的把设置页组件跑起来**驱动编辑器——开关改动只发自己那个字段（不再回写缓存快照）、保存按钮只提交改过的 persona、每次写入都带上宿主的 rev、收到 409 后自动重新载入并按宿主的值回正开关；**表情包管理器页**——诊断复选框已经从编辑器里取消（也不在管理器里）；大小滑杆按宿主值回显、拖动（`input`）只改 CSS 变量不落盘、松手（`change`）才 `save` 且**只发 `stickerSize` 这一个字段**；没选文件时「添加」禁用、选文件后可点、上传 POST 带 `rev`/`name`/`label`/`when`/`data`（data 以 `data:image/png;base64,` 开头）、上传成功后网格多一张且只有自添加的那张带「删除」按钮与 `data-id`、点删除走 `/cyrene/stickers/remove` 并带上 id 与 rev、删完编辑器入口那句概况也跟着回到「2 张」；以及**回归：卡片自己身上不许有 `backdrop-filter`（只能画在 `::before` 上）、毛玻璃组齐全且已经不再挂诊断闸门、`--cyre-sticker-size` 与 `img[alt^="昔涟·"]` 两条贴图大小规则、管理器不会让素材超出页面范围（外层封顶 + 内层滚动 + 卡片锁宽）**；以及**背景图**——`.cyre-bg` 层里铺好两层交叉淡入的图与一层色纱、并且是 `position:fixed` + `z-index:-1` + `pointer-events:none`（不占布局、不接指针）、对话列纸面确实有圆角与底色、**回归：`[data-conversation-scroll]` 上不许出现 `backdrop-filter`**；清单请求带 `reload=1`、`--cyre-bg-dim` 与 `data-cyre-bg` 跟着宿主状态走、缩略图 2 张且 `src` 指向字节路由而不是 `file:`、起点那张带 `data-on="1"` 且真的铺在图层上、概况行显示张数；关开关**只发 `{ background: { enabled: false } }` 这一个键**、点缩略图发 `{ background: { current } }` 且高亮与图层一起换、**「下一张」和自动轮换都不写宿主**（这段里没有任何 POST 体含 `"current"`）、浓度拖动只改 CSS 变量与标签、松手才落盘**。
 
 `contrast.mjs` 31 项断言，从 `lib/client.js` 里抠出本包写下的 `--dsw-alias-*` token，把半透明面板 alpha 合成到渐变背景上（取粉最浓、层最透的最不利一角），算 WCAG 对比度：正文 10.7:1（浅）/12.1:1（深），次级与说明文字 ≥4.5:1，语义状态色 ≥3:1（error / warn-label ≥4.5:1），自绘主按钮上的字 ≥4.5:1。**为了过这些线，浅色主题的 brand 填充、caption/tertiary/deep-diving、state-\* 都比纯"糖果粉"深了一档**——粉色仍然在，只是不再是白字压浅粉那种读不清的搭配。
 
@@ -195,10 +262,12 @@ node test/contrast.mjs
 dsh-cyrene-theme/
   package.json          dsh.bundle.patch + dsh.client（platform: web）
   cordis.patch.yml      插件树插入声明
-  lib/index.js          宿主半（ESM）：系统提示词 section + /cyrene/state 路由 + 落盘 + 表情包清单/字节路由 + /cyrene/hero
-  lib/client.js         客户端半（手写 CJS bundle，无需构建）：样式表 + body 作用域 + 三个槽位 + 界面微调
+  lib/index.js          宿主半（ESM）：系统提示词 section + /cyrene/state 路由 + 落盘 + 表情包清单/字节路由 + 表情包上传/删除 + /cyrene/hero + 背景清单/字节路由
+  lib/client.js         客户端半（手写 CJS bundle，无需构建）：样式表 + body 作用域 + 三个槽位 + 界面微调 + 整页背景层与对话内容的可读处理 + 设置面板 + 独立的表情包管理器页
+  Background/           整页背景图素材（用户自己丢图进来；宿主启动时扫一次，页面每次带 reload=1 强制重扫）
   stickers.json         表情包清单（id / 名称 / 时机 / 文件），换图只改这里
   meme/                 表情包素材（11 张，jpeg/png，文件名＝表情名字）
+  stickers-custom/      面板里自添加的表情包（运行时数据，已 gitignore；不在仓库里）
   stickers/             探路用占位贴纸（cyrene-probe.png，可删）
   tools/rename-stickers.mjs  按清单把素材文件改名（`--dry` 先看，失败整批回滚）
   tools/show-stickers.mjs    把清单渲染成人眼可读的「【表情包】」段

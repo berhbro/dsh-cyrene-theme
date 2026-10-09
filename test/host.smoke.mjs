@@ -341,6 +341,142 @@ const rh8 = await post({ hero: { image: 'meme/俏皮眨眼.png', title: '让昔�
 const backHero = JSON.parse(rh8.body).value.hero
 ok('改回默认形象后重新就绪', backHero.ready === true && backHero.url === '/cyrene/hero', backHero)
 
+// ── 7e. 表情包管理：自添加 / 删除 / 大小（写入口也走 rev 闸门）
+const revNow = async () => JSON.parse((await get()).body).value.rev
+async function writeTo(path, payload) {
+  const r = makeRes()
+  await route.handler(makeReq('POST', path, JSON.stringify({ rev: await revNow(), ...payload })), r)
+  return r
+}
+const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8AAAwAB/wD/AAABAAElEQVR4nGP4//8/AwAI/AL+8V2SAAAAAElFTkSuQmCC'
+const m0 = JSON.parse((await get()).body).value
+ok(
+  'state 带 stickerSize=96 与空的 customStickers',
+  m0.stickerSize === 96 && Array.isArray(m0.customStickers) && m0.customStickers.length === 0,
+  [m0.stickerSize, m0.customStickers],
+)
+
+const up = await writeTo('/cyrene/stickers', { name: '我的图.png', label: '自定的', when: '测试用', data: 'data:image/png;base64,' + PNG_B64 })
+const upValue = JSON.parse(up.body).value
+const upId = upValue.state.customStickers[0]?.id
+ok(
+  '上传成功：回 state + 清单两个快照',
+  up.statusCode === 200 && upValue.state.customStickers.length === 1 && upValue.stickers.items.some((it) => it.id === upId && it.custom === true),
+  upValue.state.customStickers,
+)
+ok('自定义项带上 label / when', upValue.state.customStickers[0].label === '自定的' && upValue.state.customStickers[0].when === '测试用', upValue.state.customStickers[0])
+const upFile = makeRes()
+await route.handler(makeReq('GET', `/cyrene/sticker/${upId}`), upFile)
+ok(
+  '自添加的图能从宿主半读到字节（内容对得上）',
+  upFile.statusCode === 200 && upFile.bytes.length === Buffer.from(PNG_B64, 'base64').length && upFile.headers['Content-Type'] === 'image/png',
+  [upFile.statusCode, upFile.bytes.length],
+)
+ok('自定义条目落盘', (await readStateFile()).customStickers.length === 1)
+ok('人格附录立刻跟上（新贴纸马上能贴）', lastSection(A).text.includes('自定的') && lastSection(A).text.includes('测试用'))
+
+const staleUp = makeRes()
+await route.handler(makeReq('POST', '/cyrene/stickers', JSON.stringify({ rev: 1, name: 'x.png', data: 'data:image/png;base64,' + PNG_B64 })), staleUp)
+ok('上传也受 rev 闸门管（过期 → 409 stale）', staleUp.statusCode === 409 && JSON.parse(staleUp.body).error.code === 'stale', staleUp.statusCode)
+
+const badImg = await writeTo('/cyrene/stickers', { name: 'x.png', data: 'not-a-data-url' })
+ok('不是 data URL → 400 bad-image', badImg.statusCode === 400 && JSON.parse(badImg.body).error.code === 'bad-image', badImg.statusCode)
+const badType = await writeTo('/cyrene/stickers', { name: 'x.txt', data: 'data:text/plain;base64,AAAA' })
+ok('类型不认识 → 400 bad-type', badType.statusCode === 400 && JSON.parse(badType.body).error.code === 'bad-type', badType.statusCode)
+const tooBig = await writeTo('/cyrene/stickers', { name: 'big.png', data: 'data:image/png;base64,' + Buffer.alloc(8 * 1024 * 1024 + 64).toString('base64') })
+ok('解码后超过 8MB → 400 too-large', tooBig.statusCode === 400 && JSON.parse(tooBig.body).error.code === 'too-large', tooBig.statusCode)
+ok('被拒的上传没在磁盘上留下东西', (await readStateFile()).customStickers.length === 1)
+
+const szHigh = await post({ stickerSize: 9999 })
+ok('stickerSize 上限夹到 320', JSON.parse(szHigh.body).value.stickerSize === 320, JSON.parse(szHigh.body).value.stickerSize)
+const szLow = await post({ stickerSize: 10 })
+ok('stickerSize 下限夹到 48', JSON.parse(szLow.body).value.stickerSize === 48, JSON.parse(szLow.body).value.stickerSize)
+const szOk = await post({ stickerSize: 128.4 })
+ok(
+  'stickerSize 取整并落盘',
+  JSON.parse(szOk.body).value.stickerSize === 128 && (await readStateFile()).stickerSize === 128,
+  JSON.parse(szOk.body).value.stickerSize,
+)
+
+const del = makeRes()
+await route.handler(makeReq('POST', '/cyrene/stickers/remove', JSON.stringify({ rev: await revNow(), id: upId })), del)
+const delValue = JSON.parse(del.body).value
+ok(
+  '删除成功：条目与清单同时更新',
+  del.statusCode === 200 && delValue.state.customStickers.length === 0 && !delValue.stickers.items.some((it) => it.id === upId),
+  delValue.state.customStickers,
+)
+const gone = makeRes()
+await route.handler(makeReq('GET', `/cyrene/sticker/${upId}`), gone)
+ok('文件也从磁盘删掉了', gone.statusCode === 404, gone.statusCode)
+ok('删除已落盘，人格附录里也不再提它', (await readStateFile()).customStickers.length === 0 && !lastSection(A).text.includes('自定的'))
+const delMissing = makeRes()
+await route.handler(makeReq('POST', '/cyrene/stickers/remove', JSON.stringify({ rev: await revNow(), id: '../../etc/passwd' })), delMissing)
+ok(
+  '删不存在的 id（含路径穿越写法）→ 404 not-found',
+  delMissing.statusCode === 404 && JSON.parse(delMissing.body).error.code === 'not-found',
+  delMissing.statusCode,
+)
+
+// ── 7e. 背景图：Background/ 的清单 + 字节路由 + 设定（开关 / 选图 / 轮换 / 浓度）
+const bg1 = await get()
+const bgState = JSON.parse(bg1.body).value.background
+ok(
+  'GET /cyrene/state 带 background（默认开着、起点按目录顺序第一张、不轮换、90s、浓度 0.6）',
+  bgState !== null && typeof bgState === 'object' &&
+    bgState.enabled === true && bgState.current === '' && bgState.rotate === false &&
+    bgState.interval === 90 && bgState.dim === 0.6,
+  bgState,
+)
+const rb1 = makeRes()
+await route.handler(makeReq('GET', '/cyrene/backgrounds'), rb1)
+const bgList = JSON.parse(rb1.body).value
+ok(
+  'GET /cyrene/backgrounds 回清单',
+  rb1.statusCode === 200 && bgList.items.length > 0 && bgList.folder === 'Background' && bgList.error === null,
+  [rb1.statusCode, bgList.items?.length, bgList.error],
+)
+ok(
+  '清单项带 id / type / bytes / url，url 与文件名一一对应',
+  bgList.items.every((it) => typeof it.id === 'string' && it.id !== '' && typeof it.type === 'string' && it.bytes > 0 &&
+    it.url === '/cyrene/background/' + encodeURIComponent(it.id)),
+  bgList.items[0],
+)
+const bgFirst = bgList.items[0]
+const rb2 = makeRes()
+await route.handler(makeReq('GET', `/cyrene/background/${encodeURIComponent(bgFirst.id)}`), rb2)
+ok(
+  'GET /cyrene/background/<name> 回图片字节（响应头与表情包同一套）',
+  rb2.statusCode === 200 && rb2.bytes.length === bgFirst.bytes && rb2.headers['Content-Type'] === bgFirst.type &&
+    rb2.headers['Cache-Control'] === 'private, max-age=300' && rb2.headers['X-Content-Type-Options'] === 'nosniff',
+  [rb2.statusCode, rb2.bytes.length, rb2.headers?.['Content-Type']],
+)
+const rb3 = makeRes()
+await route.handler(makeReq('GET', '/cyrene/background/not-a-real-picture.jpeg'), rb3)
+ok('不在清单里的名字 → 404 not-found', rb3.statusCode === 404 && JSON.parse(rb3.body).error.code === 'not-found', rb3.statusCode)
+const rb4 = makeRes()
+await route.handler(makeReq('GET', '/cyrene/background/..%2F..%2Fpackage.json'), rb4)
+ok('路径穿越写法也走「不在清单里」这条路（读不到包外文件）', rb4.statusCode === 404, rb4.statusCode)
+
+const rb5 = await post({ background: { dim: 5, interval: 3, enabled: 'no', current: '../outside.jpeg' } })
+const clampedBg = JSON.parse(rb5.body).value.background
+ok(
+  '脏值一律不写进去：dim / interval 收到区间内，非布尔的开关与带路径的文件名保持原样',
+  clampedBg.dim === 0.85 && clampedBg.interval === 15 && clampedBg.enabled === true && clampedBg.current === '',
+  clampedBg,
+)
+const rb6 = await post({ background: { enabled: false, rotate: true, interval: 120, dim: 0.4, current: bgFirst.name } })
+const goodBg = JSON.parse(rb6.body).value.background
+ok(
+  '正常的背景设定照常生效',
+  goodBg.enabled === false && goodBg.rotate === true && goodBg.interval === 120 && goodBg.dim === 0.4 && goodBg.current === bgFirst.name,
+  goodBg,
+)
+const bgDisk = (await readStateFile()).background
+ok('背景设定已落盘', bgDisk.current === bgFirst.name && bgDisk.dim === 0.4 && bgDisk.rotate === true, bgDisk)
+const rb7 = await post({ background: { enabled: true, rotate: false, interval: 90, dim: 0.6, current: '' } })
+ok('改回默认也是普通写入（后面的段落只看 theme / rev）', JSON.parse(rb7.body).value.background.enabled === true, rb7.statusCode)
+
 // ── 8. order 回退：旧版键 / 完全没有这个键
 const B = makeCtx({ DEPLOYMENT_PERSONA: 0 })
 apply(B.ctx)
