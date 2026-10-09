@@ -1,0 +1,34 @@
+{
+  "name": "dsh-cyrene-theme",
+  "version": "0.1.0",
+  "private": true,
+  "description": "昔涟（Cyrene）主题：粉白渐变毛玻璃 UI + 侧边栏可编辑的人格设定",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [],
+      "platform": "web"
+    }
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "stickers.json",
+    "meme",
+    "stickers",
+    "tools",
+    "test",
+    "README.md"
+  ],
+  "license": "MIT"
+}

@@ -1,0 +1,13 @@
+# 依赖与缓存
+node_modules/
+__pycache__/
+*.py[cod]
+
+# 系统垃圾
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 被放弃的素材：方形特写大头照，抠底做不干净，未参与主题；
+# 仍然留在本地目录里，只是不进仓库。
+meme/IMG_20260612_155829.jpg

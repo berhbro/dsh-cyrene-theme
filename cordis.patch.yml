@@ -1,0 +1,5 @@
+# 昔涟主题 bundle patch：把本包插入 profile 的插件树。
+# 安装：dsh plugin --profile desktop add D:\dshWorkPlace\dsh-cyrene-theme
+- insert:
+    - id: ui-cyrene-theme
+      name: dsh-cyrene-theme
