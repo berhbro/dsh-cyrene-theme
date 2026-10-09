@@ -20,13 +20,14 @@
 - 拍完在仓库根的 `package.json` 旁边放一个 `screenshots.json`（**现在先别放**——图还没有，放了市场弹窗会去抓 404 空图）：
 
   ```json
-  {
-    "screenshots": [
-      "docs/screenshots/01-theme.png",
-      "docs/screenshots/02-background.png",
-      "docs/screenshots/03-panel.png"
-    ]
-  }
+  [
+    "docs/screenshots/01-theme.png",
+    "docs/screenshots/02-background.png",
+    "docs/screenshots/03-panel.png"
+  ]
   ```
 
-  规则：1–8 条、仓库内的相对路径、**不能出现 `..`**。不写这个文件也行，那时市场会尝试从 README 里抓图。
+  路径是相对 `screenshots.json` 自己的（也就是相对仓库根）。写成 `{"screenshots": [ ... ]}` 也认；也可以直接写 **GitHub 托管的 https 绝对 URL**，但第三方图床会被拒。规则：1–8 条、**不能以 `/` 开头、不能出现 `..`**、图片本身要在仓库里（推自己的仓库就生效，不用来提 PR）。
+
+- **不声明也行**：那时市场会退回去**从仓库根 README 里抽图**——所以哪天放了真截图，最好顺手把 `screenshots.json` 写清楚，免得抽到别的东西。
+- 这个说明文件（`docs/screenshots/README.md`）本身不参与任何抽取，留着就行。
