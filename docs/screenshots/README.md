@@ -1,33 +1,37 @@
 # 截图（给插件市场用）
 
-这里的图是给 [dshmarket](https://dshmarket.com) 的插件弹窗和 awesome-dsh-plugin 的条目页用的，**不影响插件运行**。目前目录是空的——图要你亲自拍（本机没法自截图），拍好丢进来即可。
+这里的图是给 [dshmarket](https://dshmarket.com) 的插件详情页和 awesome-dsh-plugin 的条目页用的，**不影响插件运行、也不进 npm 包**（`package.json` 的 `files` 里没有 `docs/`）。
 
-## 拍哪几张
+## 现在有什么
+
+| 文件 | 拍的是什么 |
+| --- | --- |
+| `LightTheme.png` | 浅色主题 + `Background/the-longest-night.jpeg` + 新会话欢迎页（贴纸 + 粉白艺术字）。2560×1380，1.3 MB |
+| `DarkTheme.png` | 深色主题 + `Background/night-reading.jpeg`，同一个空白会话。2560×1380，2.2 MB |
+
+两张都是**空白新会话**（没有任何真实会话正文、文件路径、插件列表），可以放心公开。
+
+顺序由仓库根的 [`screenshots.json`](../../screenshots.json) 决定，第一张就是市场卡片/详情页的封面：
+
+```json
+{ "screenshots": [ "docs/screenshots/LightTheme.png", "docs/screenshots/DarkTheme.png" ] }
+```
+
+路径相对 `screenshots.json` 自己（也就是仓库根）；写成数组也认。规则：1–8 条、**不能以 `/` 开头、不能含 `..`**、图片必须在仓库里。改完推自己的仓库就生效（下一次 nightly 构建），不用来提 PR。
+
+## 还想再补的话（可选）
+
+1–8 张，同屏同风格最省事。按"能最快说明这插件在干什么"排：
 
 | 建议文件名 | 拍什么 |
 | --- | --- |
-| `01-theme.png` | 主界面全景：左侧栏 + 对话区 + 输入框（浅色主题，「✦ 昔涟」按钮可见） |
-| `02-background.png` | 开了背景图的样子，最好能看见输入框与正文压在照片上仍然清楚 |
-| `03-panel.png` | 「✦ 昔涟」人格设定面板展开（含「✦ 表情包管理」入口那一行） |
-| `04-hero.png` | 新会话欢迎页：昔涟贴纸 + 粉白艺术字 + 输入框占位提示 |
-| `05-stickers.png` | 表情包管理器整页（缩略图网格 + 大小滑杆） |
-| `06-dark.png` | 深色主题 + `night-reading.jpeg` 那张夜景背景 |
+| `PanelLight.png` | 「✦ 昔涟」人格设定面板展开：编辑框 + 三个开关 + 「✦ 表情包管理」入口那一行 + 背景二选一与缩略图条 |
+| `Stickers.png` | 表情包管理器整页（缩略图网格 + 大小滑杆） |
+| `Chat.png` | 一段真实对话，最好**有一条贴了表情包**的回复、标题能看出主题（这个要新开一个干净会话再拍，别露出隐私） |
 
-## 规格
+规格：`png` / `jpg`，宽 1600–2560px 即可；**别露出隐私**——会话正文、文件路径、API key、别的插件名都避开，或者新开一个干净会话再拍。加了图记得把文件名补进根目录的 `screenshots.json`。
 
-- 1–8 张，`png` / `jpg`，宽 1600px 左右就够（约 500 KB 以内一张），命名用两位数字前缀保证顺序。
-- **别露出隐私**：会话正文、文件路径、API key、别的插件名都尽量避开，或者新开一个干净会话再拍。
-- 拍完在仓库根的 `package.json` 旁边放一个 `screenshots.json`（**现在先别放**——图还没有，放了市场弹窗会去抓 404 空图）：
+## 两条容易踩的
 
-  ```json
-  [
-    "docs/screenshots/01-theme.png",
-    "docs/screenshots/02-background.png",
-    "docs/screenshots/03-panel.png"
-  ]
-  ```
-
-  路径是相对 `screenshots.json` 自己的（也就是相对仓库根）。写成 `{"screenshots": [ ... ]}` 也认；也可以直接写 **GitHub 托管的 https 绝对 URL**，但第三方图床会被拒。规则：1–8 条、**不能以 `/` 开头、不能出现 `..`**、图片本身要在仓库里（推自己的仓库就生效，不用来提 PR）。
-
-- **不声明也行**：那时市场会退回去**从仓库根 README 里抽图**——所以哪天放了真截图，最好顺手把 `screenshots.json` 写清楚，免得抽到别的东西。
-- 这个说明文件（`docs/screenshots/README.md`）本身不参与任何抽取，留着就行。
+- **不声明 `screenshots.json` 也可以**，那时市场会退回去**从仓库根 README 里抽图**——现在 README 里正好放了这两张，效果一样；声明只是为了控制顺序与增删。
+- 别把图挪出 `docs/screenshots/`（或改名）却不改 `screenshots.json`：相对路径会直接 404；这也是上游坚持"路径写相对、放自己仓库"的原因。

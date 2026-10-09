@@ -39,6 +39,18 @@ dsh plugin --profile desktop add github:berhbro/dsh-cyrene-theme
 
 卸载：`dsh plugin --profile desktop remove dsh-cyrene-theme`。
 
+## 截图
+
+浅色主题（`the-longest-night.jpeg`）与新会话欢迎页：
+
+![浅色主题](docs/screenshots/LightTheme.png)
+
+深色主题（`night-reading.jpeg`）：
+
+![深色主题](docs/screenshots/DarkTheme.png)
+
+给插件市场用的截图清单在同目录的 [`screenshots.json`](screenshots.json)（市场会读它，不读本页；放哪几张、什么顺序都由它定）。
+
 ## 使用
 
 1. 安装后刷新一次 DSH 页面——客户端半是新 bundle，不刷新不会加载。
@@ -295,7 +307,8 @@ dsh-cyrene-theme/
   meme/                 表情包素材（11 张，jpeg/png，文件名＝表情名字）
   stickers-custom/      面板里自添加的表情包（运行时数据，已 gitignore；不在仓库里）
   LICENSE               MIT
-  docs/screenshots/     给插件市场用的截图放这儿（现在是空目录 + 说明，只在仓库里，不进 npm 包）
+  screenshots.json      给插件市场看的截图清单（在 package.json 旁边，市场读它；不进 npm 包）
+  docs/screenshots/     市场截图（LightTheme.png / DarkTheme.png，只在仓库里，不进 npm 包）+ 拍摄说明
   tools/rename-stickers.mjs  按清单把素材文件改名（`--dry` 先看，失败整批回滚）
   tools/show-stickers.mjs    把清单渲染成人眼可读的「【表情包】」段
   tools/hero-preview.py      画出欢迎页艺术字的候选字体对照图（预览用，不参与运行）
