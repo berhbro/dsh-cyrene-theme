@@ -41,15 +41,21 @@ dsh plugin --profile desktop add github:berhbro/dsh-cyrene-theme
 
 ## 截图
 
-浅色主题（`the-longest-night.jpeg`）与新会话欢迎页：
-
-![浅色主题](docs/screenshots/LightTheme.png)
-
-深色主题（`night-reading.jpeg`）：
+深色主题（`night-reading.jpeg`）与新会话欢迎页：
 
 ![深色主题](docs/screenshots/DarkTheme.png)
 
-给插件市场用的截图清单在同目录的 [`screenshots.json`](screenshots.json)（市场会读它，不读本页；放哪几张、什么顺序都由它定）。
+浅色主题（`the-longest-night.jpeg`）与欢迎页艺术字：
+
+![浅色主题](docs/screenshots/LightTheme.png)
+
+控制板（设置 → 昔涟 · 主题：人格底稿与三个开关）与背景区块（二选一 / 轮换 / 间隔 / 淡化 / 缩略图）：
+
+| 人格与主题 | 背景 |
+| --- | --- |
+| ![人格与主题](docs/screenshots/PersonalityManager.png) | ![背景](docs/screenshots/BackgroundPanel.png) |
+
+给插件市场用的截图清单在仓库根的 [`screenshots.json`](screenshots.json)（市场读它、不读本页；放哪几张、什么顺序都由它定，**第一张就是封面**——现在是深色那张）。
 
 ## 使用
 
@@ -308,7 +314,7 @@ dsh-cyrene-theme/
   stickers-custom/      面板里自添加的表情包（运行时数据，已 gitignore；不在仓库里）
   LICENSE               MIT
   screenshots.json      给插件市场看的截图清单（在 package.json 旁边，市场读它；不进 npm 包）
-  docs/screenshots/     市场截图（LightTheme.png / DarkTheme.png，只在仓库里，不进 npm 包）+ 拍摄说明
+  docs/screenshots/     市场截图 4 张（DarkTheme / LightTheme / PersonalityManager / BackgroundPanel；只在仓库里，不进 npm 包）
   tools/rename-stickers.mjs  按清单把素材文件改名（`--dry` 先看，失败整批回滚）
   tools/show-stickers.mjs    把清单渲染成人眼可读的「【表情包】」段
   tools/hero-preview.py      画出欢迎页艺术字的候选字体对照图（预览用，不参与运行）

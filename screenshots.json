@@ -1,6 +1,8 @@
 {
   "screenshots": [
+    "docs/screenshots/DarkTheme.png",
     "docs/screenshots/LightTheme.png",
-    "docs/screenshots/DarkTheme.png"
+    "docs/screenshots/PersonalityManager.png",
+    "docs/screenshots/BackgroundPanel.png"
   ]
 }

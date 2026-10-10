@@ -15,3 +15,6 @@ meme/IMG_20260612_155829.jpg
 # 面板里自添加的表情包（运行时数据，不属于插件本体）。
 # 留在插件目录里是为了让聊天的 Markdown 绝对路径读得到它。
 stickers-custom/
+
+# 截图目录里的备忘笔记：只给自己看，不进仓库（四张 png 照常进）。
+docs/screenshots/README.md

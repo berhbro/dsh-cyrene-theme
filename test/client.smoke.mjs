@@ -763,6 +763,15 @@ ok(
   thumbImgB?.src,
 )
 ok(
+  '缩略图里的文件名只占一行、放不下就省略号（完整名留在 title 上）',
+  /\.cyre-bg-thumb span\{[^}]*white-space:nowrap/.test(cssText) &&
+    /\.cyre-bg-thumb span\{[^}]*text-overflow:ellipsis/.test(cssText) &&
+    /\.cyre-bg-thumb span\{[^}]*overflow:hidden/.test(cssText) &&
+    thumbsB[0].title === 'a.jpeg' && thumbsB[1].title === 'b.jpeg' &&
+    thumbsB.every((el) => el.querySelector !== undefined && el.descendants().some((n) => n.tagName === 'span' && n.textContent === el.title)),
+  [thumbsB.map((el) => el.title), /\.cyre-bg-thumb span\{[^}]*\}/.exec(cssText)?.[0]],
+)
+ok(
   'current 为空＝用清单第一张，那张是亮着的',
   thumbsB[0].attrs['data-on'] === '1' && thumbsB[1].attrs['data-on'] === undefined,
   thumbsB.map((el) => el.attrs['data-on']),
