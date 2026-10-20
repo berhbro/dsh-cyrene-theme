@@ -207,7 +207,7 @@ async function bootstrap(response, options = {}) {
   return { spec, exports: exports_, calls, react, refs, intervals, doc: globalThis.document }
 }
 
-function makeCtx() {
+function makeCtx(options = {}) {
   const registered = []
   const injected = []
   const effects = []
@@ -222,6 +222,10 @@ function makeCtx() {
         cb()
       },
       register(registration, component) {
+        // 模拟「宿主已经在同一优先级占了 single 槽」——真实契约会直接 throw。
+        if (options.failSlot === registration.name) {
+          throw new Error(`single slot "${registration.name}" already has a registration at priority 0`)
+        }
         registered.push({ registration, component })
       },
     },
@@ -361,7 +365,29 @@ ok(
   box.registered[2].registration.id === undefined && box.registered[2].registration.order === undefined,
   box.registered[2].registration,
 )
+ok(
+  '欢迎页槽位用 priority -1 去盖住宿主在 p0 的那条鱼（issue #1）',
+  box.registered[2].registration.priority === -1,
+  box.registered[2].registration,
+)
 ok('组件是可调用的 React 组件', box.registered.every((r) => typeof r.component === 'function'))
+
+// 宿主（DSH Desktop 的 dsh-desktop-client-ui）已经在 p0 占了欢迎页标记：注册会抛，
+// 但错误必须关在自己的回调里——抛到外面会被算成「声明这个槽位的宿主入口」激活失败，
+// 整个 GUI 起不来（issue #1 的实际现象）。
+const conflictBox = makeCtx({ failSlot: 'conversation.hero.brand.mark' })
+let conflictError = null
+try {
+  boot.exports.apply(conflictBox.ctx)
+} catch (error) {
+  conflictError = error
+}
+ok('宿主占用欢迎页槽位时 apply 不抛（失败不外溢）', conflictError === null, conflictError && conflictError.message)
+ok(
+  '冲突时其它两个槽位照常注册',
+  conflictBox.registered.map((r) => r.registration.name).join(',') === 'sidebar.footer.action,settings.section',
+  conflictBox.registered.map((r) => r.registration.name),
+)
 
 const get = boot.calls.find((c) => c.method === 'GET' && c.url.endsWith('/cyrene/state'))
 ok('GET 打到 /cyrene/state', get?.url === 'http://127.0.0.1:19387/cyrene/state', get)
