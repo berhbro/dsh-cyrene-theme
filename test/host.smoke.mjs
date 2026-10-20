@@ -15,6 +15,8 @@ const home = await mkdtemp(join(tmpdir(), 'cyrene-host-'))
 process.env.DSH_HOME = home
 const MOD = new URL('../lib/index.js', import.meta.url).href
 const STATE_FILE = join(home, 'cyrene-theme.json')
+/** 本包的版本号（期望值取自 package.json，而不是写死）。 */
+const PKG_VERSION = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version
 
 let passed = 0
 const failures = []
@@ -140,6 +142,11 @@ ok('信封 {ok:true,value}', j1.ok === true && typeof j1.value === 'object')
 ok('statePath 落在临时 home', j1.value.statePath === STATE_FILE, j1.value.statePath)
 ok('初值 enabled=true theme=true', j1.value.enabled === true && j1.value.theme === true)
 ok('defaultPersona === persona（未改过）', j1.value.defaultPersona === j1.value.persona)
+ok(
+  '快照带本包版本号（直接来自安装目录的 package.json）',
+  j1.value.version === PKG_VERSION && PKG_VERSION !== '',
+  [j1.value.version, PKG_VERSION],
+)
 ok(
   '响应头 charset=utf-8 + no-store',
   /charset=utf-8/i.test(String(r1.headers?.['Content-Type'] ?? r1.headers?.['content-type'] ?? '')) &&

@@ -424,7 +424,7 @@ ok('读不到宿主也照样装上（skin 退回本地默认 on）', globalThis.
 ok('槽位仍然注册了', box3.registered.length === 3)
 
 // ── 6. 编辑器真的跑起来：只发改动字段 + rev 契约 + 409 冲突后自动重新载入
-const REV7 = { ok: true, value: { ...RESPONSE.value, rev: 7, theme: true } }
+const REV7 = { ok: true, value: { ...RESPONSE.value, rev: 7, theme: true, version: '0.1.1' } }
 const STALE = {
   ok: false,
   error: { code: 'stale', message: '设定已在别处改动，已为你重新载入最新版本，请再操作一次' },
@@ -488,7 +488,16 @@ const bootS = await bootstrap(async (call) => {
 const boxS = makeCtx()
 bootS.exports.apply(boxS.ctx)
 await tick()
-boxS.registered.find((r) => r.registration.id === 'cyrene-theme').component()
+const pageS = boxS.registered.find((r) => r.registration.id === 'cyrene-theme').component()
+const headS = (pageS.children ?? []).find((c) => c && c.props && c.props.className === 'cyre-page-head')
+const verS = headS === undefined
+  ? undefined
+  : headS.children.find((c) => c && c.props && c.props['data-role'] === 'version')
+ok(
+  '设置页标题旁显示插件版本号（值来自宿主半读的 package.json）',
+  verS !== undefined && verS.children.join('') === 'v0.1.1',
+  verS === undefined ? null : verS.children,
+)
 const editorS = bootS.refs[0].current.children[0]
 const themeS = editorS.querySelector('[data-role="theme"]')
 const statusS = editorS.querySelector('[data-role="status"]')
