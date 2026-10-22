@@ -191,15 +191,25 @@ for (const [mode, map] of [
   }
 }
 
-// 工具提示：背景是实心深色，文字用 label-primary-inverted。
-{
-  const bg = LIGHT.get('--dsw-alias-tooltip-bg')
-  const fg = LIGHT.get('--dsw-alias-label-primary-inverted')
-  if (bg && fg) {
+// 工具提示 / 轻提示：气泡底色是本包写的 token，但**文字色是宿主写死的**——
+// dsh-web-frontend 里 `._bubble` 用 `color:var(--dsw-static-neutral-bluish-00)`，
+// toast 用 `--dsw-alias-toast-label`（默认也指向它）。本主题深色块把 bluish-00
+// 调暗成正文色，如果气泡底也保持深色就会"深底深字"看不清，所以两种模式都要算。
+for (const [mode, map] of [['light', LIGHT], ['dark', DARK]]) {
+  const pairs = [
+    ['tooltip 文字', map.get('--dsw-alias-tooltip-bg'), map.get('--dsw-static-neutral-bluish-00')],
+    [
+      'toast 文字',
+      map.get('--dsw-alias-toast-bg') ?? map.get('--dsw-alias-tooltip-bg'),
+      map.get('--dsw-alias-toast-label') ?? map.get('--dsw-static-neutral-bluish-00'),
+    ],
+  ]
+  for (const [token, bg, fg] of pairs) {
+    if (bg === undefined || fg === undefined) continue
     const value = ratio(fg, bg)
     const pass = value >= 4.5
-    if (!pass) failures.push(`light: tooltip 文字 = ${value.toFixed(2)}:1 (需要 ≥ 4.5)`)
-    rows.push({ mode: 'light', token: 'tooltip 文字', value: `${value.toFixed(2)}:1`, floor: 4.5, pass })
+    if (!pass) failures.push(`${mode}: ${token} = ${value.toFixed(2)}:1 (需要 ≥ 4.5)`)
+    rows.push({ mode, token, value: `${value.toFixed(2)}:1`, floor: 4.5, pass })
   }
 }
 

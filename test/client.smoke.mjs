@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 客户端半自检：不装浏览器，用最小 DOM / react / fetch 桩把 bundle 跑一遍。
  *
  *   node test/client.smoke.mjs
@@ -72,6 +72,7 @@ class El {
   get textContent() { return this._text }
   setAttribute(k, v) { this.attrs[k] = String(v) }
   getAttribute(k) { return this.attrs[k] ?? null }
+  hasAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k) }
   removeAttribute(k) { delete this.attrs[k] }
   appendChild(child) { child.parent = this; this.children.push(child); return child }
   append(...children) { for (const child of children) this.appendChild(child) }
@@ -211,10 +212,28 @@ function makeCtx(options = {}) {
   const registered = []
   const injected = []
   const effects = []
+  const themeCalls = []
+  // 宿主主题服务（dsh-client-ui-theme 提供）：背景管理器靠 ctx.get('theme') 拿到它，
+  // 「浅色 / 深色」两档直接调它的 setTheme；真实的宿主切完会把深色标记落到 body 上，
+  // 这里照做（否则管理器读不到"现在是什么外观"）。
+  const theme = {
+    preference: options.themePreference ?? 'light',
+    setTheme(id) {
+      themeCalls.push(id)
+      this.preference = id
+      if (globalThis.document?.body) {
+        if (id === 'dark') globalThis.document.body.setAttribute('data-ds-dark-theme', '')
+        else globalThis.document.body.removeAttribute('data-ds-dark-theme')
+      }
+    },
+  }
   const ctx = {
     effect(fn, label) {
       const dispose = fn()
       effects.push({ label, dispose })
+    },
+    get(name) {
+      return name === 'theme' ? theme : undefined
     },
     slots: {
       inject(name, cb) {
@@ -230,7 +249,7 @@ function makeCtx(options = {}) {
       },
     },
   }
-  return { ctx, registered, injected, effects }
+  return { ctx, registered, injected, effects, theme, themeCalls }
 }
 
 const RESPONSE = {
@@ -254,7 +273,9 @@ const BACKGROUNDS = {
     folder: 'Background',
     items: [
       { id: 'a.jpeg', name: 'a.jpeg', type: 'image/jpeg', bytes: 10, url: '/cyrene/background/a.jpeg' },
-      { id: 'b.jpeg', name: 'b.jpeg', type: 'image/jpeg', bytes: 10, url: '/cyrene/background/b.jpeg' },
+      // 第二张标成"用户自传"，好顺手验证删除按钮只出现在自传的那几张上；
+      // url 故意带查询串：缩略图必须照用宿主给的地址，而不是自己拼一遍。
+      { id: 'b.jpeg', name: 'b.jpeg', type: 'image/jpeg', bytes: 10, custom: true, url: '/cyrene/background/b.jpeg?v=2' },
     ],
   },
 }
@@ -722,17 +743,31 @@ ok(
 // 图层必须是最底下一层且不吃鼠标，对话列要有一层自己的纸面，
 // 而且这层纸面不能是毛玻璃（输入框卡片在滚动容器里，会重新触发浮层闪烁）。
 const BG_STATE = { enabled: true, current: '', rotate: false, interval: 90, dim: 0.6 }
+// 假宿主也得分状态：每次写只合并补丁，别把没动的字段（尤其 current）冲回默认值。
+let bgLive = { ...BG_STATE }
+let bgRev = 7
+const bgNextRev = () => { bgRev += 1; return bgRev }
 const REVB = { ok: true, value: { ...REV7.value, background: BG_STATE } }
 const bootB = await bootstrap((call) => {
   if (call.url.endsWith('/cyrene/report')) return { status: 200, payload: { ok: true, value: { at: 'now' } } }
-  if (isBackgrounds(call)) return { status: 200, payload: BACKGROUNDS }
+  if (isBackgrounds(call)) {
+    if (call.method === 'GET') return { status: 200, payload: BACKGROUNDS }
+    // 上传 / 删除：回一份新状态 + 新清单（形状和宿主半一致）。
+    const patch = JSON.parse(call.body)
+    bgLive = { ...bgLive, ...(patch.background ?? null) }
+    return {
+      status: 200,
+      payload: { ok: true, value: { state: { ...REVB.value, rev: bgNextRev(), background: bgLive }, backgrounds: BACKGROUNDS.value } },
+    }
+  }
   if (call.url.includes('/cyrene/stickers')) return { status: 200, payload: STICKERS }
   if (call.method === 'POST') {
     const patch = JSON.parse(call.body)
     // 宿主半的 POST /cyrene/state 直接回一份新状态（不是嵌在 value.state 里）。
+    bgLive = { ...bgLive, ...(patch.background ?? null) }
     return {
       status: 200,
-      payload: { ok: true, value: { ...REVB.value, rev: 8, background: { ...BG_STATE, ...(patch.background ?? null) } } },
+      payload: { ok: true, value: { ...REVB.value, rev: bgNextRev(), background: bgLive } },
     }
   }
   return { status: 200, payload: REVB }
@@ -788,9 +823,32 @@ ok(
 boxB.registered.find((r) => r.registration.id === 'cyrene-theme').component()
 await tick()
 const editorB = bootB.refs[0].current.children[0]
-const stripB = editorB.querySelector('[data-role="bg-strip"]')
+ok(
+  '编辑器里只留一行背景入口（概况 + 「打开管理器」），缩略图与滑杆都搬进管理器了',
+  editorB.querySelector('[data-role="open-backgrounds"]') !== null &&
+    editorB.querySelector('[data-role="bg-strip"]') === null &&
+    editorB.querySelector('[data-role="bg-rotate"]') === null &&
+    editorB.querySelector('[data-role="bg-interval"]') === null &&
+    editorB.querySelector('[data-role="bg-dim"]') === null &&
+    editorB.querySelector('[data-role="bg-next"]') === null,
+  editorB.descendants().map((el) => el.attrs['data-role']).filter(Boolean),
+)
+ok('概况行跟着清单', /2 张/.test(editorB.querySelector('[data-role="bg-note"]').textContent), editorB.querySelector('[data-role="bg-note"]').textContent)
+ok(
+  '当前那张真的铺在图层上',
+  activeImage().includes('/cyrene/background/a.jpeg'),
+  activeImage(),
+)
+
+// 打开背景管理器（整页覆盖层，挂在 body 上；和表情包管理器同一套骨架）
+editorB.dispatch('click', { target: editorB.querySelector('[data-role="open-backgrounds"]') })
+await tick()
+const pageB = bootB.doc.body.descendants().find((el) => el.className === 'cyre-overlay cyre-overlay--wide')
+ok('点入口打开背景管理器页（挂在 body 上的覆盖层）', pageB !== undefined && pageB !== null, bootB.doc.body.descendants().map((el) => el.className))
+const managerB = pageB.descendants().find((el) => el.className === 'cyre-manager')
+const stripB = managerB.querySelector('[data-role="bg-strip"]')
 const thumbsB = stripB.descendants().filter((el) => el.className === 'cyre-bg-thumb')
-ok('缩略图条按清单渲染（每张一个按钮）', thumbsB.length === 2, thumbsB.length)
+ok('管理器按清单渲染缩略图（每张一个按钮）', thumbsB.length === 2, thumbsB.length)
 const thumbImgB = thumbsB[0]?.descendants().find((el) => el.tagName === 'img')
 ok(
   '缩略图走宿主半的字节路由，不是 file:// 本地路径',
@@ -811,20 +869,27 @@ ok(
   thumbsB[0].attrs['data-on'] === '1' && thumbsB[1].attrs['data-on'] === undefined,
   thumbsB.map((el) => el.attrs['data-on']),
 )
-ok('概况行跟着清单', /2 张/.test(editorB.querySelector('[data-role="bg-summary"]').textContent), editorB.querySelector('[data-role="bg-summary"]').textContent)
+const darkBtnB = managerB.descendants().filter((el) => el.attrs['data-role'] === 'bg-dark')
+const delBtnB = managerB.descendants().filter((el) => el.attrs['data-role'] === 'bg-del')
 ok(
-  '当前那张真的铺在图层上',
-  activeImage().includes('/cyrene/background/a.jpeg'),
-  activeImage(),
+  '「深色」绑图按钮已经取消；「删除」只出现在用户自传的那几张上',
+  darkBtnB.length === 0 && delBtnB.length === 1 && delBtnB[0].attrs['data-id'] === 'b.jpeg',
+  [darkBtnB.length, delBtnB.map((el) => el.attrs['data-id'])],
 )
 
-const bgModeImage = editorB.querySelector('[data-role="bg-mode-image"]')
-const bgModePlain = editorB.querySelector('[data-role="bg-mode-plain"]')
 ok(
-  '风格是二选一：进来时「背景图」亮着、「简约（无图）」没亮，root 上写着当前档',
+  '编辑器里已经没有二选一按钮（都搬进管理器了）',
+  editorB.querySelector('[data-role="bg-mode-image"]') === null &&
+    editorB.querySelector('[data-role="bg-mode-plain"]') === null,
+  editorB.descendants().map((el) => el.attrs['data-role']).filter(Boolean),
+)
+const bgModeImage = managerB.querySelector('[data-role="bg-mode-image"]')
+const bgModePlain = managerB.querySelector('[data-role="bg-mode-plain"]')
+ok(
+  '管理器里风格是二选一：进来时「背景图」亮着、「简约（无图）」没亮，root 上写着当前档',
   bgModeImage.attrs['data-on'] === '1' && bgModePlain.attrs['data-on'] === undefined &&
-    editorB.attrs['data-bg-mode'] === 'image',
-  [bgModeImage.attrs['data-on'], bgModePlain.attrs['data-on'], editorB.attrs['data-bg-mode']],
+    managerB.attrs['data-bg-mode'] === 'image',
+  [bgModeImage.attrs['data-on'], bgModePlain.attrs['data-on'], managerB.attrs['data-bg-mode']],
 )
 const bgPostOf = (from) => bootB.calls.slice(from).find((c) => c.method === 'POST' && c.url.endsWith('/cyrene/state'))
 const bgPatchOf = (from) => {
@@ -833,7 +898,7 @@ const bgPatchOf = (from) => {
 }
 
 const beforeBg = bootB.calls.length
-editorB.dispatch('click', { target: bgModePlain })
+managerB.dispatch('click', { target: bgModePlain })
 await tick()
 const offPatch = bgPatchOf(beforeBg)
 ok(
@@ -846,26 +911,26 @@ ok('简约档下整层直接 display:none，页面回到没加背景图之前那
 ok(
   '高亮与档位跟着切，跟图片有关的控件淡下去',
   bgModePlain.attrs['data-on'] === '1' && bgModeImage.attrs['data-on'] === undefined &&
-    editorB.attrs['data-bg-mode'] === 'plain' && /\[data-bg-mode="plain"\] \.cyre-bg-only/.test(cssText),
-  editorB.attrs['data-bg-mode'],
+    managerB.attrs['data-bg-mode'] === 'plain' && /\[data-bg-mode="plain"\] \.cyre-bg-only/.test(cssText),
+  managerB.attrs['data-bg-mode'],
 )
 
 const beforeSameMode = bootB.calls.length
-editorB.dispatch('click', { target: bgModePlain })
+managerB.dispatch('click', { target: bgModePlain })
 await tick()
 ok('同一档再点一次不重复写宿主（只是重画一遍）', bgPostOf(beforeSameMode) === undefined, bootB.calls.slice(beforeSameMode).map((c) => c.url))
 
-editorB.dispatch('click', { target: bgModeImage })
+managerB.dispatch('click', { target: bgModeImage })
 await tick()
 ok(
   '切回「背景图」又铺回原样（不用刷新页面）',
-  docB.body.attrs['data-cyre-bg'] === 'on' && editorB.attrs['data-bg-mode'] === 'image' &&
+  docB.body.attrs['data-cyre-bg'] === 'on' && managerB.attrs['data-bg-mode'] === 'image' &&
     activeImage().includes('/cyrene/background/a.jpeg'),
   [docB.body.attrs['data-cyre-bg'], activeImage()],
 )
 
 const beforePick = bootB.calls.length
-editorB.dispatch('click', { target: thumbsB[1] })
+managerB.dispatch('click', { target: thumbsB[1] })
 await tick()
 const pickPatch = bgPatchOf(beforePick)
 ok(
@@ -881,7 +946,7 @@ ok(
 )
 
 const beforeNext = bootB.calls.length
-editorB.dispatch('click', { target: editorB.querySelector('[data-role="bg-next"]') })
+managerB.dispatch('click', { target: managerB.querySelector('[data-role="bg-next"]') })
 await tick()
 ok(
   '「下一张」只在页面里换图，不写宿主（下一张不等于改起点）',
@@ -889,7 +954,8 @@ ok(
   activeImage(),
 )
 
-const bgRotateBox = editorB.querySelector('[data-role="bg-rotate"]')
+// 轮换 / 淡化：滑杆和开关都在管理器里
+const bgRotateBox = managerB.querySelector('[data-role="bg-rotate"]')
 bgRotateBox.checked = true
 bgRotateBox.dispatch('change')
 await tick()
@@ -907,13 +973,13 @@ ok(
   activeImage(),
 )
 const beforeDim = bootB.calls.length
-const bgDimRange = editorB.querySelector('[data-role="bg-dim"]')
+const bgDimRange = managerB.querySelector('[data-role="bg-dim"]')
 bgDimRange.value = '0.35'
 bgDimRange.dispatch('input')
 ok(
   '拖浓度滑杆时就地预览（只改 CSS 变量，还没落盘）',
   docB.body.style.getPropertyValue('--cyre-bg-dim') === '0.35' && bgPostOf(beforeDim) === undefined &&
-    editorB.querySelector('[data-role="bg-dim-label"]').textContent === '35%',
+    managerB.querySelector('[data-role="bg-dim-label"]').textContent === '35%',
   docB.body.style.getPropertyValue('--cyre-bg-dim'),
 )
 bgDimRange.dispatch('change')
@@ -923,6 +989,98 @@ ok(
   '松手才把浓度交给宿主',
   dimPatch?.background?.dim === 0.35 && Object.keys(dimPatch.background).length === 1,
   dimPatch,
+)
+
+// 外观：管理器里一个「浅色 / 深色」总开关（原来每张卡片上的「深色」绑图按钮已经取消）
+const appearanceLightB = managerB.querySelector('[data-role="bg-appearance-light"]')
+const appearanceDarkB = managerB.querySelector('[data-role="bg-appearance-dark"]')
+ok(
+  '外观是浅色 / 深色两档，进来时「浅色」亮着（body 上没有深色标记）',
+  appearanceLightB !== null && appearanceDarkB !== null &&
+    appearanceLightB.attrs['data-on'] === '1' && appearanceDarkB.attrs['data-on'] === undefined &&
+    bootB.doc.body.hasAttribute('data-ds-dark-theme') === false,
+  [appearanceLightB?.attrs['data-on'], appearanceDarkB?.attrs['data-on']],
+)
+const beforeAppearance = bootB.calls.length
+managerB.dispatch('click', { target: appearanceDarkB })
+await tick()
+ok(
+  '点「深色」调宿主主题服务的 setTheme("dark")，插件自己的状态一个字节都不写',
+  boxB.themeCalls.length === 1 && boxB.themeCalls[0] === 'dark' && bgPostOf(beforeAppearance) === undefined,
+  boxB.themeCalls,
+)
+ok(
+  '切完高亮跟着换，管理器底下写着现在是哪种外观',
+  appearanceDarkB.attrs['data-on'] === '1' && appearanceLightB.attrs['data-on'] === undefined &&
+    /深色/.test(managerB.querySelector('[data-role="appearance-note"]').textContent) &&
+    /外观/.test(managerB.querySelector('[data-role="dark-note"]').textContent),
+  [managerB.querySelector('[data-role="appearance-note"]').textContent, managerB.querySelector('[data-role="dark-note"]').textContent],
+)
+managerB.dispatch('click', { target: appearanceLightB })
+await tick()
+ok(
+  '点「浅色」切回去（setTheme("light")），同样不写插件状态',
+  boxB.themeCalls.length === 2 && boxB.themeCalls[1] === 'light' &&
+    appearanceLightB.attrs['data-on'] === '1' && bgPostOf(beforeAppearance) === undefined,
+  boxB.themeCalls,
+)
+// 深浅色和背景图**不绑定**：切外观不换图，选图也不动外观。
+const beforeSwitchImage = activeImage()
+bootB.doc.body.setAttribute('data-ds-dark-theme', '')
+const rotB = managerB.querySelector('[data-role="bg-rotate"]')
+rotB.checked = true
+rotB.dispatch('change')
+await tick()
+ok(
+  '切到深色不换背景：重铺时用的还是用户选的那张起点',
+  activeImage().includes('/cyrene/background/b.jpeg') && beforeSwitchImage === activeImage(),
+  activeImage(),
+)
+bootB.doc.body.removeAttribute('data-ds-dark-theme')
+rotB.checked = false
+rotB.dispatch('change')
+await tick()
+
+// 上传：走 /cyrene/backgrounds（12MB 上限那条路），带 rev / 文件名 / 标签 / data URL
+const fileB = managerB.querySelector('[data-role="bg-file"]')
+const labelB = managerB.querySelector('[data-role="bg-label"]')
+const uploadB = managerB.querySelector('[data-role="bg-upload"]')
+fileB.files = [{ name: 'mine.png', type: 'image/png' }]
+labelB.value = '夜色'
+const beforeUp = bootB.calls.length
+uploadB.dispatch('click')
+await slow(30)
+const upCall = bootB.calls.slice(beforeUp).find((c) => c.method === 'POST' && c.url.endsWith('/cyrene/backgrounds'))
+const upBody = upCall ? JSON.parse(upCall.body) : null
+ok(
+  '上传走 /cyrene/backgrounds，带 rev / 文件名 / 标签 / data URL',
+  Number.isInteger(upBody?.rev) && upBody.rev >= 7 && upBody?.name === 'mine.png' && upBody?.label === '夜色' &&
+    String(upBody?.data).startsWith('data:image/png;base64,'),
+  upBody === null ? null : { ...upBody, data: String(upBody.data).slice(0, 28) + '…' },
+)
+
+const beforeDelB = bootB.calls.length
+managerB.dispatch('click', { target: delBtnB[0] })
+await slow(20)
+const delCallB = bootB.calls.slice(beforeDelB).find((c) => c.method === 'POST' && c.url.endsWith('/cyrene/backgrounds/remove'))
+const delBodyB = delCallB ? JSON.parse(delCallB.body) : null
+ok(
+  '删除走 /cyrene/backgrounds/remove，带 id 与 rev',
+  delBodyB?.id === 'b.jpeg' && Number.isInteger(delBodyB?.rev) && delBodyB.rev >= 8,
+  delBodyB,
+)
+
+// 小屏：欢迎页那一行要能收住（否则 360px 宽的手机上文字会顶出屏幕）
+ok(
+  '窄屏媒体查询收住了欢迎页：缩字号 / 允许换行 / 形象收小',
+  /@media \(max-width: 620px\)\{[\s\S]*?\.cyre-hero-title\{[^}]*font-size:clamp/.test(cssText) &&
+    /@media \(max-width: 620px\)\{[\s\S]*?\.cyre-hero\{[^}]*flex-wrap:wrap/.test(cssText) &&
+    /@media \(max-width: 620px\)\{[\s\S]*?\.cyre-overlay\{[^}]*max-width:calc\(100vw/.test(cssText),
+)
+ok(
+  '背景地址优先用宿主给的 url（手机外壳的 baseURI 和桌面不一样）',
+  thumbsB[1].descendants().some((el) => el.tagName === 'img' && String(el.src).includes('?v=2')),
+  thumbsB.map((el) => el.descendants().find((n) => n.tagName === 'img')?.src),
 )
 
 // ── 7. 取证扫描的挑选逻辑：谁带 backdrop-filter、谁是大面积半透明

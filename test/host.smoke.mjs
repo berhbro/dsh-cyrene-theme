@@ -182,6 +182,8 @@ ok('no-op 写进 lastWrite 但不算改动', JSON.parse(r1c.body).value.lastWrit
 // ── 3. POST 改人格 → 立即重挂 section + 落盘 + rev 自增
 const beforePost = A.sections.length
 const r2 = await post({ persona: '测试人格 v2 · TEST' })
+// section 的正文是宿主回调里异步拼出来的（表情包附录要读清单），等一拍再断言。
+await tick()
 ok('POST 200', r2.statusCode === 200, r2.statusCode)
 ok('POST 回传新值', JSON.parse(r2.body).value.persona === '测试人格 v2 · TEST')
 ok('写入后 rev 自增到 1', JSON.parse(r2.body).value.rev === 1, JSON.parse(r2.body).value.rev)
@@ -483,6 +485,71 @@ const bgDisk = (await readStateFile()).background
 ok('背景设定已落盘', bgDisk.current === bgFirst.name && bgDisk.dim === 0.4 && bgDisk.rotate === true, bgDisk)
 const rb7 = await post({ background: { enabled: true, rotate: false, interval: 90, dim: 0.6, current: '' } })
 ok('改回默认也是普通写入（后面的段落只看 theme / rev）', JSON.parse(rb7.body).value.background.enabled === true, rb7.statusCode)
+
+// ── 7f. 背景管理器：自传 / 删除（和表情包同一套规矩）
+// 深浅色与背景图不绑定，状态里已经没有 darkImage：老配置写进来的这个键会被忽略。
+const legacyDark = await post({ background: { darkImage: 'a.jpeg' } })
+ok(
+  '不再有「深色那张」这个设定：补丁里的 darkImage 不会写进状态',
+  legacyDark.statusCode === 200 && JSON.parse(legacyDark.body).value.background.darkImage === undefined,
+  JSON.parse(legacyDark.body).value.background,
+)
+
+const bgUp = await writeTo('/cyrene/backgrounds', { name: 'mine.png', label: '夜色', data: 'data:image/png;base64,' + PNG_B64 })
+const bgUpValue = JSON.parse(bgUp.body).value
+const bgUpItem = bgUpValue.backgrounds.items.find((it) => it.custom === true)
+ok(
+  '上传背景图成功：回 state + 背景清单两个快照，自传项标 custom',
+  bgUp.statusCode === 200 && bgUpItem !== undefined && bgUpItem.custom === true && bgUpItem.name === '夜色' &&
+    bgUpValue.state.background !== undefined,
+  [bgUp.statusCode, bgUpItem],
+)
+ok(
+  '随包那几张不算 custom（客户端据此决定给不给删除按钮）',
+  bgUpValue.backgrounds.items.filter((it) => it.custom !== true).length === bgList.items.length,
+  bgUpValue.backgrounds.items.map((it) => it.custom),
+)
+const bgUpFile = makeRes()
+await route.handler(makeReq('GET', `/cyrene/background/${encodeURIComponent(bgUpItem.id)}`), bgUpFile)
+ok(
+  '自传的背景图能从宿主半读到字节（内容和表情包上传的一样走同一套路由）',
+  bgUpFile.statusCode === 200 && bgUpFile.bytes.length === Buffer.from(PNG_B64, 'base64').length && bgUpFile.headers['Content-Type'] === 'image/png',
+  [bgUpFile.statusCode, bgUpFile.bytes.length],
+)
+ok('自传条目落盘', (await readStateFile()).customBackgrounds.length === 1)
+
+const bgStale = makeRes()
+await route.handler(makeReq('POST', '/cyrene/backgrounds', JSON.stringify({ rev: 1, name: 'x.png', data: 'data:image/png;base64,' + PNG_B64 })), bgStale)
+ok('背景上传也受 rev 闸门管（过期 → 409 stale）', bgStale.statusCode === 409 && JSON.parse(bgStale.body).error.code === 'stale', bgStale.statusCode)
+const bgBadImg = await writeTo('/cyrene/backgrounds', { name: 'x.png', data: 'not-a-data-url' })
+ok('背景不是 data URL → 400 bad-image', bgBadImg.statusCode === 400 && JSON.parse(bgBadImg.body).error.code === 'bad-image', bgBadImg.statusCode)
+const bgBadType = await writeTo('/cyrene/backgrounds', { name: 'x.txt', data: 'data:text/plain;base64,AAAA' })
+ok('背景类型不认识 → 400 bad-type', bgBadType.statusCode === 400 && JSON.parse(bgBadType.body).error.code === 'bad-type', bgBadType.statusCode)
+
+const bgDelShipped = makeRes()
+await route.handler(makeReq('POST', '/cyrene/backgrounds/remove', JSON.stringify({ rev: await revNow(), id: bgFirst.name })), bgDelShipped)
+ok(
+  '随包那张删不掉（只能删自己传的）→ 404 not-found',
+  bgDelShipped.statusCode === 404 && JSON.parse(bgDelShipped.body).error.code === 'not-found',
+  bgDelShipped.statusCode,
+)
+
+// 先把它设成起点，再删：这个引用得跟着清掉，别留悬空 id。
+await post({ background: { current: bgUpItem.id } })
+const bgDel = makeRes()
+await route.handler(makeReq('POST', '/cyrene/backgrounds/remove', JSON.stringify({ rev: await revNow(), id: bgUpItem.id })), bgDel)
+const bgDelValue = JSON.parse(bgDel.body).value
+ok(
+  '删除自传背景：条目、清单、起点一起收拾',
+  bgDel.statusCode === 200 && bgDelValue.state.customBackgrounds.length === 0 &&
+    !bgDelValue.backgrounds.items.some((it) => it.id === bgUpItem.id) &&
+    bgDelValue.state.background.current === '',
+  [bgDelValue.state.customBackgrounds, bgDelValue.state.background, bgDelValue.backgrounds.items.length],
+)
+const bgGone = makeRes()
+await route.handler(makeReq('GET', `/cyrene/background/${encodeURIComponent(bgUpItem.id)}`), bgGone)
+ok('文件也从磁盘删掉了', bgGone.statusCode === 404, bgGone.statusCode)
+ok('删除已落盘', (await readStateFile()).customBackgrounds.length === 0)
 
 // ── 8. order 回退：旧版键 / 完全没有这个键
 const B = makeCtx({ DEPLOYMENT_PERSONA: 0 })
