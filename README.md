@@ -1,10 +1,14 @@
 # dsh-cyrene-theme · 昔涟主题
 
+[![npm](https://img.shields.io/npm/v/dsh-cyrene-theme?label=npm&color=e87cae)](https://www.npmjs.com/package/dsh-cyrene-theme)
+[![license](https://img.shields.io/badge/license-MIT-e87cae)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/berhbro/dsh-cyrene-theme?color=e87cae)](https://github.com/berhbro/dsh-cyrene-theme)
+
 把 DSH Web GUI 换成《崩坏：星穹铁道》昔涟（Cyrene）的粉白渐变毛玻璃主题，把 agent 的人格设定改成昔涟——人格提示词可以直接在侧边栏里改——让她在该有情绪的时候贴一张自己的表情包，把新会话欢迎页的鱼换成她、顺手把输入框的默认提示换成她的话，还能把整页背景换成 `Background/` 里放的那几张图（可以在面板里开关、选起点、自动轮换，也能自己上传新的；深色模式下还能自动换成指定的那一张）。
 
 > **English** — A pink-and-white frosted-glass skin for the DSH Web GUI, themed after Cyrene from *Honkai: Star Rail*. It also rewrites the agent persona (editable from the sidebar), teaches the agent to post Cyrene reaction stickers, replaces the new-session hero fish with her, and adds a full-page background manager (enable / pick / rotate / fade the images in `Background/`, upload your own, and bind one image to dark mode).
 >
-> Install: `dsh plugin --profile web add github:berhbro/dsh-cyrene-theme` — then reload the page. UI text is Chinese.
+> Install: `dsh plugin --profile web add dsh-cyrene-theme` (npm, pinned version) or `… add github:berhbro/dsh-cyrene-theme` (tracks the latest commit) — then reload the page. UI text is Chinese.
 >
 > **Unofficial fan project.** Cyrene and all *Honkai: Star Rail* character art, names and assets are © miHoYo / HoYoverse, used here as non-commercial fan work. Not affiliated with or endorsed by miHoYo, HoYoverse or DeepSeek — see 「版权与致谢」 below.
 
@@ -29,7 +33,13 @@
 dsh plugin --profile desktop add D:\dshWorkPlace\dsh-cyrene-theme
 ```
 
-从 GitHub（`--profile` 换成你自己的 profile 名，Web 端一般是 `web`，桌面端是 `desktop`）：
+从 npm（发布版，版本号固定；`--profile` 换成你自己的 profile 名，Web 端一般是 `web`，桌面端是 `desktop`）：
+
+```powershell
+dsh plugin --profile desktop add dsh-cyrene-theme
+```
+
+从 GitHub（跟随 `main` 的最新提交，能拿到还没发版的改动）：
 
 ```powershell
 dsh plugin --profile desktop add github:berhbro/dsh-cyrene-theme
@@ -43,17 +53,17 @@ dsh plugin --profile desktop add github:berhbro/dsh-cyrene-theme
 
 深色主题（`night-reading.jpeg`）与新会话欢迎页：
 
-![深色主题](docs/screenshots/DarkTheme.png)
+![深色主题](https://raw.githubusercontent.com/berhbro/dsh-cyrene-theme/main/docs/screenshots/DarkTheme.png)
 
 浅色主题（`the-longest-night.jpeg`）与欢迎页艺术字：
 
-![浅色主题](docs/screenshots/LightTheme.png)
+![浅色主题](https://raw.githubusercontent.com/berhbro/dsh-cyrene-theme/main/docs/screenshots/LightTheme.png)
 
-控制板（设置 → 昔涟 · 主题：人格底稿与三个开关）与背景区块（二选一 / 轮换 / 间隔 / 淡化 / 缩略图）：
+控制板（设置 → 昔涟 · 主题：人格底稿与三个开关）与背景管理器（外观两档 / 二选一 / 轮换 / 间隔 / 淡化 / 缩略图）：
 
 | 人格与主题 | 背景 |
 | --- | --- |
-| ![人格与主题](docs/screenshots/PersonalityManager.png) | ![背景](docs/screenshots/BackgroundPanel.png) |
+| ![人格与主题](https://raw.githubusercontent.com/berhbro/dsh-cyrene-theme/main/docs/screenshots/PersonalityManager.png) | ![背景](https://raw.githubusercontent.com/berhbro/dsh-cyrene-theme/main/docs/screenshots/BackgroundPanel.png) |
 
 给插件市场用的截图清单在仓库根的 [`screenshots.json`](screenshots.json)（市场读它、不读本页；放哪几张、什么顺序都由它定，**第一张就是封面**——现在是深色那张）。
 

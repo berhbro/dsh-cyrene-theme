@@ -13,6 +13,10 @@ import { join } from 'node:path'
 
 const home = await mkdtemp(join(tmpdir(), 'cyrene-host-'))
 process.env.DSH_HOME = home
+// 用户自传的素材目录默认在插件目录里；测试必须把它们指到临时目录，
+// 否则会读到（也会写脏）本机真实上传的那些图。
+process.env.CYRENE_CUSTOM_STICKER_DIR = join(home, 'stickers-custom')
+process.env.CYRENE_CUSTOM_BACKGROUND_DIR = join(home, 'backgrounds-custom')
 const MOD = new URL('../lib/index.js', import.meta.url).href
 const STATE_FILE = join(home, 'cyrene-theme.json')
 /** 本包的版本号（期望值取自 package.json，而不是写死）。 */
