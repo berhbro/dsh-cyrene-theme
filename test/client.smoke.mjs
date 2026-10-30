@@ -795,6 +795,11 @@ ok(
     /\.cyre-bg\{[^}]*pointer-events:none/.test(cssText),
 )
 ok(
+  '背景层显式退出宿主的 no-drag 减法（铺满视口的 body 子元素会把 [data-window-drag] 整片减掉 → 窗口拖不动、双击也不能缩放）',
+  /body\[data-dsh-cyrene\] > \.cyre-bg\{[^}]*-webkit-app-region:initial !important/.test(cssText) &&
+    /body\[data-dsh-cyrene\] > \.cyre-bg\{[^}]*[;{\s]app-region:initial !important/.test(cssText),
+)
+ok(
   '整列对话区不再刷白：滚动容器身上没有底色 / 圆角那套"纸面"（照片才透得上来）',
   !/\[data-cyre-bg="on"\] \[data-conversation-scroll\]\{[^}]*background:/.test(cssText) &&
     !/\[data-cyre-bg="on"\] \[data-conversation-scroll\]\{[^}]*border-radius/.test(cssText),
