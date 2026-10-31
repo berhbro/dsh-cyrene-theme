@@ -1,6 +1,6 @@
 {
   "name": "dsh-cyrene-theme",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "昔涟（Cyrene）主题：粉白渐变毛玻璃 UI + 侧边栏可编辑的人格设定 + 表情包与背景图管理 | A Cyrene (Honkai: Star Rail) theme for DeepSeek Harness",
   "type": "module",
   "main": "lib/index.js",
