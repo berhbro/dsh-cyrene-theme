@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 宿主半自检：不起服务器、不碰真实 ~/.dsh，全在临时目录里跑。
  *
  *   node test/host.smoke.mjs
@@ -17,6 +17,8 @@ process.env.DSH_HOME = home
 // 否则会读到（也会写脏）本机真实上传的那些图。
 process.env.CYRENE_CUSTOM_STICKER_DIR = join(home, 'stickers-custom')
 process.env.CYRENE_CUSTOM_BACKGROUND_DIR = join(home, 'backgrounds-custom')
+// 打开文件管理器那条路由在自检里不能真的弹窗。
+process.env.CYRENE_NO_REVEAL = '1'
 const MOD = new URL('../lib/index.js', import.meta.url).href
 const STATE_FILE = join(home, 'cyrene-theme.json')
 /** 本包的版本号（期望值取自 package.json，而不是写死）。 */
@@ -192,7 +194,12 @@ ok('POST 200', r2.statusCode === 200, r2.statusCode)
 ok('POST 回传新值', JSON.parse(r2.body).value.persona === '测试人格 v2 · TEST')
 ok('写入后 rev 自增到 1', JSON.parse(r2.body).value.rev === 1, JSON.parse(r2.body).value.rev)
 ok('lastWrite 记下这次成功写入的字段', JSON.parse(r2.body).value.lastWrite?.result === 'ok' && JSON.parse(r2.body).value.lastWrite?.keys.join(',') === 'persona')
-ok('重挂：多一个 section 且旧的被 disposal', A.sections.length === beforePost + 1 && A.sections[beforePost - 1].disposed === true)
+const livePersona = A.sections.filter((s) => s.name === 'cyrene:persona' && s.disposed !== true)
+ok(
+  '重挂：任何时候都只剩一份活着的人格 section（旧的被 disposal）',
+  livePersona.length === 1 && A.sections.some((s) => s.name === 'cyrene:persona' && s.disposed === true),
+  [A.sections.length, livePersona.length],
+)
 ok(
   '新 section 正文 = 新设定 + 表情包约定',
   lastSection(A).text.startsWith('测试人格 v2 · TEST') && lastSection(A).text.includes('【表情包】'),
@@ -356,6 +363,12 @@ ok('改回默认形象后重新就绪', backHero.ready === true && backHero.url 
 
 // ── 7e. 表情包管理：自添加 / 删除 / 大小（写入口也走 rev 闸门）
 const revNow = async () => JSON.parse((await get()).body).value.rev
+/** 记忆有自己的一份 rev，别和主题设定的混用。 */
+const memRev = async () => {
+  const r = makeRes()
+  await route.handler(makeReq('GET', '/cyrene/memory'), r)
+  return JSON.parse(r.body).value.rev
+}
 async function writeTo(path, payload) {
   const r = makeRes()
   await route.handler(makeReq('POST', path, JSON.stringify({ rev: await revNow(), ...payload })), r)
@@ -554,6 +567,92 @@ const bgGone = makeRes()
 await route.handler(makeReq('GET', `/cyrene/background/${encodeURIComponent(bgUpItem.id)}`), bgGone)
 ok('文件也从磁盘删掉了', bgGone.statusCode === 404, bgGone.statusCode)
 ok('删除已落盘', (await readStateFile()).customBackgrounds.length === 0)
+
+// ── 7g. 长期记忆：独立文件、独立 rev、四个动作
+const memGet = makeRes()
+await route.handler(makeReq('GET', '/cyrene/memory'), memGet)
+const mem0 = JSON.parse(memGet.body).value
+ok(
+  '记忆清单能读：空的、默认开启、rev=0',
+  memGet.statusCode === 200 && mem0.count === 0 && mem0.enabled === true && mem0.rev === 0 && typeof mem0.path === 'string',
+  [memGet.statusCode, mem0.count, mem0.enabled, mem0.rev],
+)
+
+const memAdd = makeRes()
+await route.handler(makeReq('POST', '/cyrene/memory', JSON.stringify({ rev: 0, action: 'add', text: '  用户偏好深色主题  ', tags: '偏好, 环境' })), memAdd)
+const memAddValue = JSON.parse(memAdd.body).value
+ok(
+  '加一条：空白被归一化、标签按逗号切开、rev 自增',
+  memAdd.statusCode === 200 && memAddValue.count === 1 && memAddValue.rev === 1 &&
+    memAddValue.items[0].text === '用户偏好深色主题' && memAddValue.items[0].tags.join('/') === '偏好/环境',
+  [memAdd.statusCode, memAddValue.items[0]],
+)
+
+const memFile = JSON.parse(await readFile(mem0.path, 'utf8'))
+ok('记忆写在自己的文件里（不塞进主题设定）', memFile.items.length === 1 && !('persona' in memFile) && memFile.rev === 1, Object.keys(memFile))
+
+const memNoRev = makeRes()
+await route.handler(makeReq('POST', '/cyrene/memory', JSON.stringify({ action: 'add', text: 'x' })), memNoRev)
+ok('记忆写入也要求 rev（不带 → 400 client-outdated）', memNoRev.statusCode === 400 && JSON.parse(memNoRev.body).error.code === 'client-outdated', memNoRev.statusCode)
+
+const memStale = makeRes()
+await route.handler(makeReq('POST', '/cyrene/memory', JSON.stringify({ rev: 0, action: 'add', text: 'x' })), memStale)
+ok('记忆的 rev 和主题设定各算各的（过期 → 409 stale）', memStale.statusCode === 409 && JSON.parse(memStale.body).error.code === 'stale', memStale.statusCode)
+
+const memEmpty = makeRes()
+await route.handler(makeReq('POST', '/cyrene/memory', JSON.stringify({ rev: 1, action: 'add', text: '   ' })), memEmpty)
+ok('空正文 → 400 empty-text（不写空条目）', memEmpty.statusCode === 400 && JSON.parse(memEmpty.body).error.code === 'empty-text', memEmpty.statusCode)
+
+const memToggle = makeRes()
+await route.handler(makeReq('POST', '/cyrene/memory', JSON.stringify({ rev: 1, action: 'toggle', enabled: false })), memToggle)
+const memToggleValue = JSON.parse(memToggle.body).value
+ok('关掉记忆：enabled=false，条目还在（不删数据）', memToggle.statusCode === 200 && memToggleValue.enabled === false && memToggleValue.count === 1, [memToggleValue.enabled, memToggleValue.count])
+
+const memBack = makeRes()
+await route.handler(makeReq('POST', '/cyrene/memory', JSON.stringify({ rev: 2, action: 'toggle', enabled: true })), memBack)
+ok('再打开：enabled 回来', JSON.parse(memBack.body).value.enabled === true)
+
+const memBad = makeRes()
+await route.handler(makeReq('POST', '/cyrene/memory', JSON.stringify({ rev: 3, action: 'nope' })), memBad)
+ok('不认识的动作 → 400 bad-action', memBad.statusCode === 400 && JSON.parse(memBad.body).error.code === 'bad-action', memBad.statusCode)
+
+const memGone = makeRes()
+await route.handler(makeReq('POST', '/cyrene/memory', JSON.stringify({ rev: await memRev(), action: 'remove', id: 'mem-nope' })), memGone)
+ok('删一条不存在的 → 404 not-found', memGone.statusCode === 404 && JSON.parse(memGone.body).error.code === 'not-found', memGone.statusCode)
+
+const memDel = makeRes()
+await route.handler(makeReq('POST', '/cyrene/memory', JSON.stringify({ rev: await memRev(), action: 'remove', id: memAddValue.items[0].id })), memDel)
+ok('删掉那一条：count 归零', memDel.statusCode === 200 && JSON.parse(memDel.body).value.count === 0, memDel.statusCode)
+// 原文视图：text/plain，不缓存；内容就是落盘的那份 JSON。
+const rawRes = makeRes()
+await route.handler(makeReq('GET', '/cyrene/memory/raw'), rawRes)
+const rawText = rawRes.body ?? ''
+ok(
+  '原文视图走 text/plain（浏览器打开就能读，不会变成下载）',
+  rawRes.statusCode === 200 && /text\/plain;\s*charset=utf-8/.test(String(rawRes.headers['Content-Type'] ?? '')) &&
+    rawRes.headers['Cache-Control'] === 'no-store' && rawRes.headers['X-Content-Type-Options'] === 'nosniff',
+  rawRes.headers,
+)
+ok('原文视图回的是能解析的 JSON，字段和落盘一致', (() => {
+  try {
+    const parsed = JSON.parse(rawText)
+    return Array.isArray(parsed.items) && typeof parsed.enabled === 'boolean' && Number.isInteger(parsed.rev)
+  } catch {
+    return false
+  }
+})(), rawText.slice(0, 80))
+
+// 打开文件位置：自检里不真弹窗，只验信封与路径。
+const revealRes = makeRes()
+await route.handler(makeReq('POST', '/cyrene/memory/reveal'), revealRes)
+const revealValue = JSON.parse(revealRes.body).value
+ok(
+  '「打开文件位置」回 ok，并带上记忆文件的绝对路径',
+  revealRes.statusCode === 200 && revealValue.opened === true &&
+    typeof revealValue.path === 'string' && revealValue.path.endsWith('cyrene-memory.json'),
+  revealValue,
+)
+ok('打开文件位置之后文件确实在磁盘上（先落盘再叫窗口）', await readFile(revealValue.path, 'utf8').then(() => true, () => false))
 
 // ── 8. order 回退：旧版键 / 完全没有这个键
 const B = makeCtx({ DEPLOYMENT_PERSONA: 0 })

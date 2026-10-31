@@ -1088,6 +1088,140 @@ ok(
   thumbsB.map((el) => el.descendants().find((n) => n.tagName === 'img')?.src),
 )
 
+{
+// ── 6e. 长期记忆：入口一行 → 单独一页；增 / 删 / 开关都走记忆自己的 rev
+let memLive = { error: null, enabled: true, rev: 0, count: 0, limit: 300, path: 'C:/x/cyrene-memory.json', items: [] }
+let memRevN = 0
+const memNextRev = () => { memRevN += 1; return memRevN }
+const bootMem = await bootstrap((call) => {
+  if (call.url.endsWith('/cyrene/report')) return { status: 200, payload: { ok: true, value: { at: 'now' } } }
+  if (call.url.endsWith('/cyrene/memory/reveal')) {
+    return { status: 200, payload: { ok: true, value: { opened: true, path: memLive.path } } }
+  }
+  if (call.url.includes('/cyrene/memory')) {
+    if (call.method === 'GET') return { status: 200, payload: { ok: true, value: memLive } }
+    const body = JSON.parse(call.body)
+    if (body.action === 'add') {
+      const item = { id: 'mem-a1b2c', text: String(body.text).trim(), tags: ['偏好'], created: '2026-10-29T12:00:00.000Z' }
+      memLive = { ...memLive, rev: memNextRev(), items: [item, ...memLive.items], count: memLive.items.length + 1 }
+    } else if (body.action === 'remove') {
+      const items = memLive.items.filter((it) => it.id !== body.id)
+      memLive = { ...memLive, rev: memNextRev(), items, count: items.length }
+    } else if (body.action === 'toggle') {
+      memLive = { ...memLive, rev: memNextRev(), enabled: body.enabled === true }
+    } else if (body.action === 'clear') {
+      memLive = { ...memLive, rev: memNextRev(), items: [], count: 0 }
+    }
+    return { status: 200, payload: { ok: true, value: memLive } }
+  }
+  if (isBackgrounds(call)) return { status: 200, payload: BACKGROUNDS }
+  if (call.url.includes('/cyrene/stickers')) return { status: 200, payload: STICKERS }
+  if (call.method === 'POST') return { status: 200, payload: REV7 }
+  return { status: 200, payload: REV7 }
+}, { autoHost: true })
+const boxMem = makeCtx()
+bootMem.exports.apply(boxMem.ctx)
+await tick()
+boxMem.registered.find((r) => r.registration.id === 'cyrene-theme').component()
+const editorMem = bootMem.refs[0].current.children[0]
+ok(
+  '设置页里有「长期记忆」入口，只有一句概况 + 按钮，没有把列表塞进去',
+  editorMem.querySelector('[data-role="open-memory"]') !== null &&
+    editorMem.querySelector('[data-role="memory-note"]') !== null &&
+    editorMem.querySelector('[data-role="mem-list"]') === null,
+  editorMem.descendants().map((el) => el.attrs['data-role']).filter(Boolean),
+)
+ok(
+  '还没记过的时候概况写清楚（而不是空白）',
+  /还没记过/.test(editorMem.querySelector('[data-role="memory-note"]').textContent),
+  editorMem.querySelector('[data-role="memory-note"]').textContent,
+)
+editorMem.dispatch('click', { target: editorMem.querySelector('[data-role="open-memory"]') })
+await tick()
+const pageMem = bootMem.doc.body.descendants().find((el) => el.className === 'cyre-overlay cyre-overlay--wide')
+ok('点入口打开记忆管理器页（挂在 body 上的覆盖层）', pageMem !== undefined && pageMem !== null, bootMem.doc.body.descendants().map((el) => el.className))
+const managerMem = pageMem.descendants().find((el) => el.className === 'cyre-manager')
+const listMem = managerMem.querySelector('[data-role="mem-list"]')
+ok('空状态有说明，不是一个空白框', /还没有记忆/.test(listMem.children[0].textContent), listMem.children[0].textContent)
+// 记忆文件那一行：路径 + 「打开文件位置」
+const pathMem = managerMem.querySelector('[data-role="mem-path"]')
+const revealMem = managerMem.querySelector('[data-role="mem-reveal"]')
+ok(
+  '记忆文件那一行把路径写在最前面，旁边是「打开文件位置」',
+  pathMem !== null && pathMem.textContent === memLive.path && revealMem !== null,
+  [pathMem === null ? null : pathMem.textContent, revealMem === null ? null : Object.keys(revealMem.attrs)],
+)
+const beforeReveal = bootMem.calls.length
+revealMem.dispatch('click')
+await tick()
+const revealCall = bootMem.calls.slice(beforeReveal).find((c) => c.method === 'POST' && c.url.endsWith('/cyrene/memory/reveal'))
+ok(
+  '点「打开文件位置」只发一条 reveal（不回整份快照，清单不会被冲掉）',
+  revealCall !== undefined && revealCall.body === '{}',
+  revealCall === undefined ? null : revealCall.body,
+)
+ok(
+  '打开之后状态行说明结果，清单原样还在',
+  /文件管理器/.test(managerMem.querySelector('[data-role="mstatus"]').textContent) && /还没有记忆/.test(listMem.children[0].textContent),
+  managerMem.querySelector('[data-role="mstatus"]').textContent,
+)
+
+// 加一条
+const memText = managerMem.querySelector('[data-role="mem-text"]')
+const memTags = managerMem.querySelector('[data-role="mem-tags"]')
+memText.value = '用户偏好深色主题'
+memTags.value = '偏好'
+const beforeAdd = bootMem.calls.length
+managerMem.querySelector('[data-role="mem-add"]').dispatch('click')
+await tick()
+const addCall = bootMem.calls.slice(beforeAdd).find((c) => c.method === 'POST' && c.url.includes('/cyrene/memory'))
+const addBody = addCall === undefined ? {} : JSON.parse(addCall.body)
+ok(
+  '「记住」发一条 memory POST：带记忆自己的 rev + action=add',
+  addBody.action === 'add' && addBody.text === '用户偏好深色主题' && addBody.tags === '偏好' && addBody.rev === 0,
+  addBody,
+)
+const cardsMem = managerMem.querySelector('[data-role="mem-list"]').descendants().filter((el) => el.className === 'cyre-mem-item')
+ok('加完列表里出现一张卡片（正文 + 日期/标签 + 删除）', cardsMem.length === 1 && /用户偏好深色主题/.test(cardsMem[0].children[0].textContent) && /2026-10-29/.test(cardsMem[0].children[1].textContent) && cardsMem[0].children.length === 3, cardsMem[0]?.children.map((c) => c.textContent))
+ok('加完概况行跟上（设置页那一行也刷新）', /1 条/.test(editorMem.querySelector('[data-role="memory-note"]').textContent), editorMem.querySelector('[data-role="memory-note"]').textContent)
+
+// 搜一下
+const memSearch = managerMem.querySelector('[data-role="mem-search"]')
+memSearch.value = '深色'
+memSearch.dispatch('input')
+ok('搜索只过滤列表，不发请求', managerMem.querySelector('[data-role="mem-list"]').descendants().filter((el) => el.className === 'cyre-mem-item').length === 1)
+memSearch.value = '不存在的词'
+memSearch.dispatch('input')
+ok('搜不到时给一句提示', /没有匹配的记忆/.test(listMem.children[0].textContent))
+memSearch.value = ''
+memSearch.dispatch('input')
+
+// 删掉
+const beforeDel = bootMem.calls.length
+managerMem.querySelector('[data-role="mem-del"]').dispatch('click')
+await tick()
+const delCall = bootMem.calls.slice(beforeDel).find((c) => c.method === 'POST' && c.url.includes('/cyrene/memory'))
+const delBody = delCall === undefined ? {} : JSON.parse(delCall.body)
+ok('删除发的是 action=remove + id', delBody.action === 'remove' && delBody.id === 'mem-a1b2c', delBody)
+ok('删完列表回到空状态', /还没有记忆/.test(listMem.children[0].textContent))
+
+// 开关
+const memEnabled = managerMem.querySelector('[data-role="mem-enabled"]')
+const beforeToggle = bootMem.calls.length
+memEnabled.checked = false
+memEnabled.dispatch('change')
+await tick()
+const toggleCall = bootMem.calls.slice(beforeToggle).find((c) => c.method === 'POST' && c.url.includes('/cyrene/memory'))
+const toggleBody = toggleCall === undefined ? {} : JSON.parse(toggleCall.body)
+ok('关掉记忆发的是 action=toggle + enabled=false（不删数据）', toggleBody.action === 'toggle' && toggleBody.enabled === false, toggleBody)
+ok('关掉后设置页概况写「已关闭」', /已关闭/.test(editorMem.querySelector('[data-role="memory-note"]').textContent), editorMem.querySelector('[data-role="memory-note"]').textContent)
+
+// Esc 关闭
+pageMem.descendants().find((el) => el.className === 'cyre-close').dispatch('click')
+ok('点 ✕ 关掉记忆管理器页（覆盖层从 body 上摘掉）', bootMem.doc.body.descendants().find((el) => el.className === 'cyre-overlay cyre-overlay--wide') === undefined)
+
+}
+
 // ── 7. 取证扫描的挑选逻辑：谁带 backdrop-filter、谁是大面积半透明
 // 背景：桌面外壳的页面在受限沙箱里截不了图，皮肤视觉问题只能靠页面自报，
 // 所以这条链路（扫描 → 上报）必须真的能跑，且不能把旁路接进状态写入。
