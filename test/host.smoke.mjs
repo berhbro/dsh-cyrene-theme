@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 宿主半自检：不起服务器、不碰真实 ~/.dsh，全在临时目录里跑。
  *
  *   node test/host.smoke.mjs
@@ -7,7 +7,7 @@
  *      enabled/空白 persona 的处理、404、超大请求体、跨"重启"读取磁盘设定。
  */
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -653,6 +653,136 @@ ok(
   revealValue,
 )
 ok('打开文件位置之后文件确实在磁盘上（先落盘再叫窗口）', await readFile(revealValue.path, 'utf8').then(() => true, () => false))
+
+// ── 7h. 世界书：只在有库时挂一行索引；抓取以外的动作都可离线验证
+const WORLDBOOK_FILE = join(home, 'cyrene-worldbook.json')
+const worldbookFixture = (version) => JSON.stringify({
+  schema: 1,
+  source: 'https://example.invalid/wiki',
+  sourceVersion: version,
+  fetchedAt: '2026-10-31T00:00:00.000Z',
+  entries: [
+    {
+      id: 'wiki-test-1',
+      character: '昔涟',
+      category: 'archive',
+      name: '昔涟 · 档案',
+      keys: ['昔涟'],
+      content: '来自：翁法罗斯\n城邦：哀丽秘榭\n定位：能召唤忆灵「德谬歌」协助战斗的辅助型角色。',
+    },
+    {
+      id: 'wiki-test-2',
+      character: '白厄',
+      category: 'relation',
+      name: '昔涟 × 白厄',
+      keys: ['白厄', '昔涟'],
+      content: '昔涟 × 白厄\n童年的玩伴，翁法罗斯注定的救世主，历经三千万次轮回的背负世界之人。',
+    },
+  ],
+})
+await writeFile(WORLDBOOK_FILE, worldbookFixture('3.7'), 'utf8')
+
+const wbGet = makeRes()
+await route.handler(makeReq('GET', '/cyrene/worldbook?reload=1'), wbGet)
+const wbValue = JSON.parse(wbGet.body).value
+ok('世界书索引：条目数与版本号都对得上', wbGet.statusCode === 200 && wbValue.count === 2 && wbValue.version === '3.7', wbValue.count)
+ok(
+  '世界书索引只给元信息，不带正文（正文只在工具里取）',
+  Array.isArray(wbValue.entries) && wbValue.entries.length === 2 &&
+    typeof wbValue.entries[0].name === 'string' && typeof wbValue.entries[0].size === 'number' &&
+    wbValue.entries[0].content === undefined,
+  wbValue.entries?.[0],
+)
+ok(
+  '世界书索引按角色汇总（面板要显示「几位角色」）',
+  Array.isArray(wbValue.characters) && wbValue.characters.length === 2 &&
+    wbValue.characters.some((row) => row.name === '昔涟' && row.total === 1),
+  wbValue.characters,
+)
+ok('有库时挂上 cyrene:worldbook 这一行索引', liveSections(A).some((spec) => spec.name === 'cyrene:worldbook'))
+ok(
+  '索引 section 排在人格之后、记忆之前（人格 +10）',
+  (() => {
+    const live = liveSections(A)
+    const persona = live.find((spec) => spec.name === 'cyrene:persona')
+    const book = live.find((spec) => spec.name === 'cyrene:worldbook')
+    const memory = live.find((spec) => spec.name === 'cyrene:memory')
+    return persona !== undefined && book !== undefined && book.order === persona.order + 10 &&
+      (memory === undefined || book.order < memory.order)
+  })(),
+  liveSections(A).map((spec) => `${spec.name}@${spec.order}`),
+)
+
+const wbBad = makeRes()
+await route.handler(makeReq('POST', '/cyrene/worldbook', JSON.stringify({ action: 'nope' })), wbBad)
+ok('不认识的动作 → 400 bad-action', wbBad.statusCode === 400 && JSON.parse(wbBad.body).error.code === 'bad-action', wbBad.statusCode)
+
+const wbRaw = makeRes()
+await route.handler(makeReq('GET', '/cyrene/worldbook/raw'), wbRaw)
+ok(
+  '世界书原文视图：text/plain + 不缓存',
+  wbRaw.statusCode === 200 && /text\/plain;\s*charset=utf-8/.test(String(wbRaw.headers['Content-Type'] ?? '')) &&
+    wbRaw.headers['Cache-Control'] === 'no-store',
+  wbRaw.headers,
+)
+ok('原文视图回的是能解析的 JSON，条目还在', (() => {
+  try {
+    const parsed = JSON.parse(wbRaw.body)
+    return Array.isArray(parsed.entries) && parsed.entries.length === 2 && parsed.sourceVersion === '3.7'
+  } catch {
+    return false
+  }
+})(), (wbRaw.body ?? '').slice(0, 80))
+
+const wbClear = makeRes()
+await route.handler(makeReq('POST', '/cyrene/worldbook', JSON.stringify({ action: 'clear' })), wbClear)
+const wbCleared = JSON.parse(wbClear.body).value
+ok('清空：条目归零、文件真的删掉', wbClear.statusCode === 200 && wbCleared.count === 0 &&
+  await readFile(WORLDBOOK_FILE, 'utf8').then(() => false, () => true), wbCleared.count)
+ok('清空之后那行索引 section 也卸掉了', liveSections(A).some((spec) => spec.name === 'cyrene:worldbook') === false)
+ok(
+  '清空不影响主题设定与记忆 section',
+  liveSections(A).some((spec) => spec.name === 'cyrene:persona'),
+  liveSections(A).map((spec) => spec.name),
+)
+
+// 再放一份回来 + reload：不重启也能认出新库（面板上「重新载入」就是这个动作）。
+await writeFile(WORLDBOOK_FILE, worldbookFixture('3.8'), 'utf8')
+const wbReload = makeRes()
+await route.handler(makeReq('POST', '/cyrene/worldbook', JSON.stringify({ action: 'reload' })), wbReload)
+const wbReloaded = JSON.parse(wbReload.body).value
+ok('重新载入：换了一份库就跟着换版本号', wbReload.statusCode === 200 && wbReloaded.count === 2 && wbReloaded.version === '3.8', wbReloaded.version)
+
+// 「打开文件位置」：自检里不真弹窗（CYRENE_NO_REVEAL=1），只验信封与路径。
+const wbReveal = makeRes()
+await route.handler(makeReq('POST', '/cyrene/worldbook/reveal'), wbReveal)
+const wbRevealed = JSON.parse(wbReveal.body).value
+ok(
+  '世界书「打开文件位置」回 ok + 绝对路径（指的就是那份 json）',
+  wbReveal.statusCode === 200 && wbRevealed.opened === true &&
+    typeof wbRevealed.path === 'string' && wbRevealed.path.endsWith('cyrene-worldbook.json'),
+  wbRevealed,
+)
+ok('叫文件管理器之前，文件确实已经在磁盘上', await readFile(wbRevealed.path, 'utf8').then(() => true, () => false))
+
+// 清空后再点「打开文件位置」→ 409 no-worldbook（没有文件就没有位置可开）。
+// 故意不用 not-found：那个码和宿主自己「没有这个路由」的兜底撞车，客户端分不清。
+await route.handler(makeReq('POST', '/cyrene/worldbook', JSON.stringify({ action: 'clear' })), makeRes())
+const wbRevealEmpty = makeRes()
+await route.handler(makeReq('POST', '/cyrene/worldbook/reveal'), wbRevealEmpty)
+ok(
+  '没有库时「打开文件位置」回 409 no-worldbook（不与「没有这个路由」混码）',
+  wbRevealEmpty.statusCode === 409 && JSON.parse(wbRevealEmpty.body).error.code === 'no-worldbook',
+  [wbRevealEmpty.statusCode, JSON.parse(wbRevealEmpty.body).error?.code],
+)
+
+// 收摊：这份 fixture 只属于这一段。留在磁盘上的话，后面「重挂」「order 回退」
+// 几段会把世界书 section 也数进去（它们各自 rebase 到同一份 home）。
+await rm(WORLDBOOK_FILE, { force: true })
+const wbGone = makeRes()
+await route.handler(makeReq('POST', '/cyrene/worldbook', JSON.stringify({ action: 'reload' })), wbGone)
+ok('库里没东西时那行索引自动卸掉（不会留一段空话在提示词里）', JSON.parse(wbGone.body).value.count === 0 &&
+  liveSections(A).some((spec) => spec.name === 'cyrene:worldbook') === false)
 
 // ── 8. order 回退：旧版键 / 完全没有这个键
 const B = makeCtx({ DEPLOYMENT_PERSONA: 0 })

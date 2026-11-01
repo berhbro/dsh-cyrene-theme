@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 客户端半自检：不装浏览器，用最小 DOM / react / fetch 桩把 bundle 跑一遍。
  *
  *   node test/client.smoke.mjs
@@ -166,7 +166,13 @@ async function bootstrap(response, options = {}) {
       : { status: 200, payload: response }
     const status = decided?.status ?? 200
     const payload = decided?.payload ?? decided
-    return { ok: status >= 200 && status < 300, status, json: async () => payload }
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => payload,
+      // 「看原文」走的是 text()：正文是整段 json 文本。
+      text: async () => (typeof payload === 'string' ? payload : JSON.stringify(payload)),
+    }
   }
 
   const source = await readFile(CLIENT, 'utf8')
@@ -365,6 +371,20 @@ ok(
     /\.cyre-manager-scroll\{[^}]*flex:1 1 auto[^}]*min-height:0[^}]*overflow-y:auto[^}]*overflow-x:hidden/.test(cssText) &&
     /\.cyre-sticker\{[^}]*min-width:0[^}]*max-width:100%[^}]*overflow:hidden/.test(cssText) &&
     /\.cyre-sticker img\{[^}]*max-width:100%/.test(cssText),
+)
+// 回归：滚动容器是 flex 列，子项默认会被压缩而不是让容器滚——世界书 279 条时
+// 列表被压扁、卡片直接画到下面的说明文字上。钉住 flex:0 0 auto 才真的滚。
+ok(
+  '管理器里的子项不参与压缩（否则条目一多，卡片会叠到说明文字上）',
+  /\.cyre-manager-scroll > \*\{flex:0 0 auto\}/.test(cssText),
+  (cssText.match(/\.cyre-manager-scroll > \*\{[^}]*\}/) ?? ['(没找到)'])[0],
+)
+// 回归：侧边栏那颗「✦ 昔涟」弹出的面板内容比 max-height 高时，编辑器自己得能滚——
+// 否则最后几行（世界书入口）被 overflow:hidden 裁掉，看起来就像根本没做这个控制器。
+ok(
+  '侧边栏面板里的编辑器自己能滚（内容一多，最后一行不会被裁掉）',
+  /\.cyre-editor\{[^}]*flex:1 1 auto[^}]*overflow-y:auto/.test(cssText),
+  (cssText.match(/\.cyre-editor\{[^}]*\}/) ?? ['(没找到)'])[0],
 )
 ok('body 打了 data-dsh-cyrene', globalThis.document.body.attrs['data-dsh-cyrene'] === '', globalThis.document.body.attrs)
 
@@ -1220,6 +1240,184 @@ ok('关掉后设置页概况写「已关闭」', /已关闭/.test(editorMem.quer
 pageMem.descendants().find((el) => el.className === 'cyre-close').dispatch('click')
 ok('点 ✕ 关掉记忆管理器页（覆盖层从 body 上摘掉）', bootMem.doc.body.descendants().find((el) => el.className === 'cyre-overlay cyre-overlay--wide') === undefined)
 
+}
+
+// ── 6f. 世界书：入口一行 → 单独一页；索引只给元信息，正文由模型用工具取
+{
+let wbLive = {
+  error: null,
+  count: 2,
+  version: '3.7',
+  fetchedAt: '2026-10-31T00:00:00.000Z',
+  source: 'https://act-api-takumi.mihoyo.com/event/rpgchrysosheirs/index?lang=zh-cn',
+  path: 'C:/x/cyrene-worldbook.json',
+  characters: [{ name: '昔涟', total: 1 }, { name: '白厄', total: 1 }],
+  categories: [{ key: 'archive', label: '档案', total: 1 }, { key: 'relation', label: '关系', total: 1 }],
+  entries: [
+    { id: 'wiki-test-1', name: '昔涟 · 档案', character: '昔涟', category: 'archive', keys: ['昔涟', '哀丽秘榭'], size: 120 },
+    { id: 'wiki-test-2', name: '昔涟 × 白厄', character: '白厄', category: 'relation', keys: ['白厄'], size: 140 },
+  ],
+}
+let wbRevealMode = 'ok'
+const bootWb = await bootstrap((call) => {
+  if (call.url.endsWith('/cyrene/report')) return { status: 200, payload: { ok: true, value: { at: 'now' } } }
+  if (call.url.endsWith('/cyrene/worldbook/reveal')) {
+    if (wbRevealMode === 'route-miss') {
+      // 宿主半还是旧版时的真实回包：兜底 404 也用 `not-found` 这个码。
+      return {
+        status: 404,
+        payload: { ok: false, error: { code: 'not-found', message: '没有这个路由：POST /worldbook/reveal' } },
+      }
+    }
+    if (wbRevealMode === 'empty') {
+      return { status: 409, payload: { ok: false, error: { code: 'no-worldbook', message: '还没有世界书文件，先抓取一次' } } }
+    }
+    return { status: 200, payload: { ok: true, value: { opened: true, path: 'C:/x/cyrene-worldbook.json' } } }
+  }
+  if (call.url.includes('/cyrene/worldbook')) {
+    if (call.method === 'GET') return { status: 200, payload: { ok: true, value: wbLive } }
+    const body = JSON.parse(call.body)
+    if (body.action === 'fetch') {
+      wbLive = {
+        ...wbLive,
+        count: 3,
+        version: '3.8',
+        fetchedAt: '2026-11-01T00:00:00.000Z',
+        entries: [...wbLive.entries, { id: 'wiki-test-3', name: '白厄 · 档案', character: '白厄', category: 'archive', keys: ['白厄'], size: 260 }],
+        characters: [{ name: '昔涟', total: 1 }, { name: '白厄', total: 2 }],
+      }
+    } else if (body.action === 'clear') {
+      wbLive = { ...wbLive, count: 0, version: '', fetchedAt: '', characters: [], categories: [], entries: [] }
+    }
+    return { status: 200, payload: { ok: true, value: wbLive } }
+  }
+  if (isBackgrounds(call)) return { status: 200, payload: BACKGROUNDS }
+  if (call.url.includes('/cyrene/stickers')) return { status: 200, payload: STICKERS }
+  return { status: 200, payload: REV7 }
+}, { autoHost: true })
+const boxWb = makeCtx()
+bootWb.exports.apply(boxWb.ctx)
+await tick()
+boxWb.registered.find((r) => r.registration.id === 'cyrene-theme').component()
+const editorWb = bootWb.refs[0].current.children[0]
+await tick()
+ok(
+  '设置页里有「世界书」入口，只有一句概况 + 按钮',
+  editorWb.querySelector('[data-role="open-worldbook"]') !== null &&
+    editorWb.querySelector('[data-role="worldbook-note"]') !== null &&
+    editorWb.querySelector('[data-role="wb-list"]') === null,
+  editorWb.descendants().map((el) => el.attrs['data-role']).filter(Boolean),
+)
+ok(
+  '概况写清楚库里有多少条 + 哪个版本',
+  /2 条/.test(editorWb.querySelector('[data-role="worldbook-note"]').textContent) &&
+    /3\.7/.test(editorWb.querySelector('[data-role="worldbook-note"]').textContent),
+  editorWb.querySelector('[data-role="worldbook-note"]').textContent,
+)
+editorWb.dispatch('click', { target: editorWb.querySelector('[data-role="open-worldbook"]') })
+await tick()
+const pageWb = bootWb.doc.body.descendants().find((el) => el.className === 'cyre-overlay cyre-overlay--wide')
+ok('点入口打开世界书管理器页（挂在 body 上的覆盖层）', pageWb !== undefined && pageWb !== null, bootWb.doc.body.descendants().map((el) => el.className))
+const managerWb = pageWb.descendants().find((el) => el.className === 'cyre-manager')
+const metaWb = managerWb.querySelector('[data-role="wmeta"]')
+ok(
+  '元信息那行写了版本、条数、角色数、抓取日期',
+  /3\.7/.test(metaWb.textContent) && /2 条/.test(metaWb.textContent) && /2 位角色/.test(metaWb.textContent) && /2026-10-31/.test(metaWb.textContent),
+  metaWb.textContent,
+)
+ok(
+  '抓到的条目不铺在管理器里（列表、搜索框、原文预览都不在了）——只留元信息与按钮',
+  managerWb.querySelector('[data-role="wb-list"]') === null &&
+    managerWb.querySelector('[data-role="wb-search"]') === null &&
+    managerWb.querySelector('[data-role="wb-rawbox"]') === null &&
+    managerWb.querySelector('[data-role="wb-raw"]') === null &&
+    managerWb.descendants().filter((el) => el.className === 'cyre-mem-item').length === 0,
+  managerWb.descendants().map((el) => el.attrs['data-role']).filter(Boolean),
+)
+ok(
+  '元信息里也给出文件路径（想看原文的人自己按路径去找）',
+  /cyrene-worldbook\.json/.test(metaWb.textContent),
+  metaWb.textContent,
+)
+
+// 抓取更新
+const beforeFetch = bootWb.calls.length
+managerWb.querySelector('[data-role="wb-fetch"]').dispatch('click')
+await tick()
+const fetchCall = bootWb.calls.slice(beforeFetch).find((c) => c.method === 'POST' && c.url.includes('/cyrene/worldbook'))
+ok(
+  '「抓取更新」发的是 action=fetch（写盘在宿主那一侧，客户端只发一个动作）',
+  fetchCall !== undefined && JSON.parse(fetchCall.body).action === 'fetch',
+  fetchCall === undefined ? null : fetchCall.body,
+)
+ok(
+  '抓完之后元信息与概况都跟上（3.8 / 3 条）',
+  /3\.8/.test(metaWb.textContent) && /3 条/.test(metaWb.textContent) &&
+    /3 条/.test(editorWb.querySelector('[data-role="worldbook-note"]').textContent),
+  [metaWb.textContent, editorWb.querySelector('[data-role="worldbook-note"]').textContent],
+)
+ok('状态行说明这次抓取的结果', /抓/.test(managerWb.querySelector('[data-role="wstatus"]').textContent), managerWb.querySelector('[data-role="wstatus"]').textContent)
+
+// 「打开文件位置」：交给宿主把系统文件管理器叫出来（浏览器做不到这件事）。
+const wbStatus = managerWb.querySelector('[data-role="wstatus"]')
+const beforeReveal = bootWb.calls.length
+managerWb.querySelector('[data-role="wb-reveal"]').dispatch('click')
+await tick()
+const revealCall = bootWb.calls.slice(beforeReveal).find((c) => c.method === 'POST' && c.url.endsWith('/cyrene/worldbook/reveal'))
+ok(
+  '「打开文件位置」发一条 POST 给宿主（不是 target=_blank，也不是自己拼地址）',
+  revealCall !== undefined, revealCall === undefined ? null : revealCall.url,
+)
+ok('打开成功就说一声', /已在文件管理器里打开/.test(wbStatus.textContent), wbStatus.textContent)
+
+// 宿主半还是旧版（缺这条路由）：别说成「还没抓取」——那会让人白折腾一遍。
+wbRevealMode = 'route-miss'
+managerWb.querySelector('[data-role="wb-reveal"]').dispatch('click')
+await tick()
+ok(
+  '缺路由时说清是宿主半旧版（不是「还没有文件」）',
+  /重载插件行/.test(wbStatus.textContent) && !/先抓取一次/.test(wbStatus.textContent),
+  wbStatus.textContent,
+)
+// 真的还没抓过：才提示去抓取。
+wbRevealMode = 'empty'
+managerWb.querySelector('[data-role="wb-reveal"]').dispatch('click')
+await tick()
+ok('真没文件时才提示「先抓取一次」', /先抓取一次/.test(wbStatus.textContent), wbStatus.textContent)
+wbRevealMode = 'ok'
+
+// 清空（confirm 在桩里恒为 true）
+const beforeClear = bootWb.calls.length
+managerWb.querySelector('[data-role="wb-clear"]').dispatch('click')
+await tick()
+const clearCall = bootWb.calls.slice(beforeClear).find((c) => c.method === 'POST' && c.url.includes('/cyrene/worldbook'))
+ok(
+  '「清空」发的是 action=clear',
+  clearCall !== undefined && JSON.parse(clearCall.body).action === 'clear',
+  clearCall === undefined ? null : clearCall.body,
+)
+ok('清空后元信息回到空状态说明', /还没有资料库/.test(metaWb.textContent), metaWb.textContent)
+
+pageWb.descendants().find((el) => el.className === 'cyre-close').dispatch('click')
+ok('点 ✕ 关掉世界书管理器页（覆盖层从 body 上摘掉）', bootWb.doc.body.descendants().find((el) => el.className === 'cyre-overlay cyre-overlay--wide') === undefined)
+
+// 侧边栏那颗「✦ 昔涟」弹出的面板用的是同一份编辑器——世界书入口也得在里面。
+const navEntry = boxWb.registered.find((r) => r.registration.id === 'cyrene-persona')
+const navElement = navEntry.component({ wide: true })
+navElement.props.onClick()
+await tick()
+const sidePanel = bootWb.doc.body.descendants().find(
+  (el) => el.className === 'cyre-overlay' &&
+    el.descendants().some((node) => node.attrs['data-role'] === 'open-worldbook'),
+)
+ok('侧边栏面板里也有「✦ 世界书」入口（和设置页是同一份编辑器）', sidePanel !== undefined)
+ok(
+  '面板里的世界书概况不是空壳（条数 / 还没建库）',
+  sidePanel !== undefined && /条|还没/.test(sidePanel.querySelector('[data-role="worldbook-note"]').textContent),
+  sidePanel?.querySelector('[data-role="worldbook-note"]')?.textContent,
+)
+sidePanel.descendants().find((el) => el.className === 'cyre-close').dispatch('click')
+ok('关掉面板（覆盖层摘掉，不影响后面的断言）', bootWb.doc.body.descendants().find((el) => el.className === 'cyre-overlay') === undefined)
 }
 
 // ── 7. 取证扫描的挑选逻辑：谁带 backdrop-filter、谁是大面积半透明
