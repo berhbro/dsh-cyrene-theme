@@ -372,6 +372,12 @@ node tools/build-worldbook.mjs --source ./wiki-index.json   # 用已经存下来
 
 正文不进提示词——模型觉得这一轮需要设定，自己调 `cyrene_worldbook_search`（参数 `query`，可选 `limit`，默认 5 条、单次最多 6000 字），拿到的是「条目名 + 正文」的纯文本块。库里没有东西时**这一段整个不注册**，不会白占提示词。
 
+### 检索是怎么排的
+
+同一条查询里可以写多个词（空格、顿号、逗号都行）：「阿格莱雅 关系」会先命中「阿格莱雅」的条目，再按「关系」这个词把关系类排到前面。没点名分类时档案（总览）优先、其次故事，再是关系与解析——所以只写「昔涟」拿到的是她的档案，而不是随手一条关系。
+
+触发词里没有的词会退回正文找：地名、专有名词（例如「哀丽秘榭」）没被写进 `keys`，也能靠正文命中；一个都没找到就返回 0 条，模型应当直说记不准，而不是编。
+
 ### 为什么不做「说到谁就自动注入谁」
 
 那条路要判断「用户这句话提到了哪个角色」，就得先拿到最近的对话正文。宿主给的 `PromptSection.text(ctx)` 里只有 `scope` / `signal`，没有消息内容；要拿到只能挂消息事件，那是另一套接法。现在的做法是「索引常驻 + 工具检索」：可靠、零额外请求，代价是模型得想起来去查。等自动召回那条路验通了，再叠上去也不冲突。
@@ -421,6 +427,9 @@ GET  /cyrene/report   # 读回最后一份报告（含上报时间）
 
 - **`.cyre-overlay` 是 `max-height` + `overflow:hidden`，里面的内容必须自己滚。** 侧边栏那颗「✦ 昔涟」的面板就是覆盖层，早期 `.cyre-editor` 只写了 `min-height:0` 没写 `overflow`，于是入口行加到第四行（世界书）时，**最后那行被直接裁掉**——面板看着停在「长期记忆」，用户以为世界书控制器根本没做。现在是 `.cyre-editor{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable}`，内容超长时在编辑器内部滚，最后一行永远够得着。往这个面板继续加东西时，别改回不滚的版本。
 
+- **工具 `execute()` 必须返回对象，不能返回裸字符串。** 工具声明了 `output.schema: { type:'object' }` 之后，宿主会校验返回值形状，返回 `"命中 3 条…"` 这种字符串会当场报 `tool "cyrene_worldbook_search" returned invalid output: "value" must be an object`——对话里看到的就是工具直接失败（世界书 0.4.0 首次实测踩到）。现在三个记忆工具与世界书工具都返回对象，正文放在 `value.text` 里，`output.render` 优先取它。
+- **`ensureXxx()` 别「先把 loaded 置 true 再 await」。** 世界书读盘是异步的：先置位会让第二个并发调用立刻拿到**空库**（工具在开机那一瞬间被调用时命中 0 条）。现在用一个共享的 in-flight promise，并发调用等同一个结果。
+
 ## 自检
 
 ```powershell
@@ -429,7 +438,7 @@ node test/client.smoke.mjs
 node test/contrast.mjs
 ```
 
-`host.smoke.mjs` 143 项断言，全部跑在临时目录里（脚本自己把 `DSH_HOME` 指过去，不碰真实的 `~/.dsh`）：section 名与 order 回退、默认底稿、`/cyrene/state` 的信封与响应头、落盘与跨"重启"读回、重挂 section 的 disposer 语义、`enabled=false` 与空白 persona、404、超过 256KB 的请求体，**rev 乐观并发**（缺 rev 400、过期 rev 409 且不改状态、成功写入 rev+1、重启后旧 rev 依然被拒、`lastWrite` 诊断记录被拒的尝试），**取证旁路**（`POST /cyrene/report` 存内存、`GET` 读回、超 128KB 400 拒收且不覆盖上一份、全程不碰 `rev`/状态/磁盘），**表情包**（清单解析出 11 项且都能取到字节、`Content-Type` 与长度对得上、缓存与 `nosniff` 头、未知 id 404、`stickers:false` 之后系统提示词里不再有「【表情包】」并落盘、再打开回来），以及**欢迎页形象**（`/cyrene/state` 里的 `hero` 四项、`GET /cyrene/hero` 回真图字节、缓存/nosniff/`ETag`、带对 `ETag` 回 304、改欢迎语立即生效且落盘、`../` 越界与不存在的文件都只是 `ready:false` 而不是 500、改回默认后重新就绪），以及**表情包管理**（新装的状态文件带 `stickerSize: 96` 与空 `customStickers`；上传成功回 `{state, stickers}` 两个快照、清单里那一项 `custom: true` 且 `label`/`when` 原样保留、新图能从 `/cyrene/sticker/<id>` 读回同样长度的字节、条目落盘、人格 section 立刻含新名字与时机；上传同样受 rev 闸门管、非 data URL 400 `bad-image`、类型不认识 400 `bad-type`、解码后超 8MB 400 `too-large` 且磁盘不留东西；`stickerSize` 9999→320 / 10→48 / 128.4→128 并落盘；删除后清单为空、文件也没了、人格附录不再提它；删不存在的 id（含 `../../etc/passwd` 这种写法）404 `not-found`），以及**背景图**（`/cyrene/state` 里的 `background` 五项默认值、清单回 `{ error, folder: 'Background', items }` 且每项 `url` 正好是 `/cyrene/background/<encodeURIComponent(id)>`、字节路由的长度/类型/缓存/`nosniff` 头、未知名字与 `..%2F..%2Fpackage.json` 都只是 404、脏值补丁被夹住或原样保留（`dim 5→0.85`、`interval 3→15`、`enabled:'no'` 不动、`current:'../outside.jpeg'` 不动）、正常补丁确实落盘、改回默认），**背景管理器**（补丁里带老的 `darkImage` 键会被忽略、不写进状态；上传成功回 `{ state, backgrounds }` 两个快照、自传项 `custom: true` 且显示名用 `label`、随包那几张不算 custom、字节能从同一条路由读回、条目落盘；上传同样受 rev 闸门管、非 data URL 400 `bad-image`、类型不认识 400 `bad-type`；**随包那张删不掉**（404 `not-found`）；把自传那张设成起点与深色后再删，条目／清单／`current`／`darkImage` 一起收拾干净、文件也真的从磁盘删掉），以及**版本号**（`/cyrene/state` 快照里的 `version` 与安装目录 `package.json` 的 `version` 一致且非空），以及**长期记忆**（默认是空清单、加一条时正文折叠空白/标签按逗号顿号切开/
+`host.smoke.mjs` 152 项断言，全部跑在临时目录里（脚本自己把 `DSH_HOME` 指过去，不碰真实的 `~/.dsh`）：section 名与 order 回退、默认底稿、`/cyrene/state` 的信封与响应头、落盘与跨"重启"读回、重挂 section 的 disposer 语义、`enabled=false` 与空白 persona、404、超过 256KB 的请求体，**rev 乐观并发**（缺 rev 400、过期 rev 409 且不改状态、成功写入 rev+1、重启后旧 rev 依然被拒、`lastWrite` 诊断记录被拒的尝试），**取证旁路**（`POST /cyrene/report` 存内存、`GET` 读回、超 128KB 400 拒收且不覆盖上一份、全程不碰 `rev`/状态/磁盘），**表情包**（清单解析出 11 项且都能取到字节、`Content-Type` 与长度对得上、缓存与 `nosniff` 头、未知 id 404、`stickers:false` 之后系统提示词里不再有「【表情包】」并落盘、再打开回来），以及**欢迎页形象**（`/cyrene/state` 里的 `hero` 四项、`GET /cyrene/hero` 回真图字节、缓存/nosniff/`ETag`、带对 `ETag` 回 304、改欢迎语立即生效且落盘、`../` 越界与不存在的文件都只是 `ready:false` 而不是 500、改回默认后重新就绪），以及**表情包管理**（新装的状态文件带 `stickerSize: 96` 与空 `customStickers`；上传成功回 `{state, stickers}` 两个快照、清单里那一项 `custom: true` 且 `label`/`when` 原样保留、新图能从 `/cyrene/sticker/<id>` 读回同样长度的字节、条目落盘、人格 section 立刻含新名字与时机；上传同样受 rev 闸门管、非 data URL 400 `bad-image`、类型不认识 400 `bad-type`、解码后超 8MB 400 `too-large` 且磁盘不留东西；`stickerSize` 9999→320 / 10→48 / 128.4→128 并落盘；删除后清单为空、文件也没了、人格附录不再提它；删不存在的 id（含 `../../etc/passwd` 这种写法）404 `not-found`），以及**背景图**（`/cyrene/state` 里的 `background` 五项默认值、清单回 `{ error, folder: 'Background', items }` 且每项 `url` 正好是 `/cyrene/background/<encodeURIComponent(id)>`、字节路由的长度/类型/缓存/`nosniff` 头、未知名字与 `..%2F..%2Fpackage.json` 都只是 404、脏值补丁被夹住或原样保留（`dim 5→0.85`、`interval 3→15`、`enabled:'no'` 不动、`current:'../outside.jpeg'` 不动）、正常补丁确实落盘、改回默认），**背景管理器**（补丁里带老的 `darkImage` 键会被忽略、不写进状态；上传成功回 `{ state, backgrounds }` 两个快照、自传项 `custom: true` 且显示名用 `label`、随包那几张不算 custom、字节能从同一条路由读回、条目落盘；上传同样受 rev 闸门管、非 data URL 400 `bad-image`、类型不认识 400 `bad-type`；**随包那张删不掉**（404 `not-found`）；把自传那张设成起点与深色后再删，条目／清单／`current`／`darkImage` 一起收拾干净、文件也真的从磁盘删掉），以及**版本号**（`/cyrene/state` 快照里的 `version` 与安装目录 `package.json` 的 `version` 一致且非空），以及**长期记忆**（默认是空清单、加一条时正文折叠空白/标签按逗号顿号切开/
 ev 自增、记忆写在自己的文件里且不含 persona、缺 
 ev → 400、过期 
 ev → 409、空正文 → 400、关掉只是不再注入而不删数据、再打开数据还在、未知动作 → 400、删不存在的 id → 404、删完 count 归零），以及**世界书**（索引回条数 / 版本 / 按角色汇总且**不带正文**、有库时挂上 `cyrene:worldbook` 且 order = 人格 + 10、排在记忆之前、未知动作 400 `bad-action`、原文视图 `text/plain` + `no-store` 且能解析、清空后条目归零且文件真删、清空后那行 section 也卸掉、主题 section 不受影响、换一份库再「重新载入」跟着换版本号）。

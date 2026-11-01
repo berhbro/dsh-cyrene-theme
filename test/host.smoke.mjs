@@ -11,6 +11,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+const { matchEntries } = await import('../lib/worldbook.js')
+
 const home = await mkdtemp(join(tmpdir(), 'cyrene-host-'))
 process.env.DSH_HOME = home
 // 用户自传的素材目录默认在插件目录里；测试必须把它们指到临时目录，
@@ -776,6 +778,38 @@ ok(
   [wbRevealEmpty.statusCode, JSON.parse(wbRevealEmpty.body).error?.code],
 )
 
+// 工具契约：宿主的 output.schema 是 object，execute() 返回裸字符串会当场报
+// `"value" must be an object`（世界书第一版就是这么挂的，真在对话里踩到）。
+// 上一段「没库时打开文件位置」把库清空了，这里重新放一份，再让新实例读。
+await writeFile(WORLDBOOK_FILE, worldbookFixture('3.8'), 'utf8')
+const toolsSeen = []
+const T = makeCtx({ DEPLOYMENT_PERSONA_PREFIX: 0 })
+T.ctx.get = (name) => (name === 'tools'
+  ? { register(definition) { toolsSeen.push(definition); return () => {} } }
+  : undefined)
+const modTools = await import(`${MOD}?tools=1`)
+modTools.apply(T.ctx)
+await tick()
+const wbTool = toolsSeen.find((def) => def.name === 'cyrene_worldbook_search')
+ok(
+  '世界书工具注册上了（和两个记忆工具一起）',
+  wbTool !== undefined && toolsSeen.some((def) => def.name === 'cyrene_memory_add'),
+  toolsSeen.map((def) => def.name),
+)
+const wbHitValue = await wbTool.execute({ query: '昔涟', limit: 1 })
+ok(
+  '工具返回的是对象，不是裸字符串（value.text 里放正文）',
+  wbHitValue !== null && typeof wbHitValue === 'object' && typeof wbHitValue.text === 'string',
+  typeof wbHitValue,
+)
+ok('命中时正文里带条目名，且 count 有数', /昔涟/.test(wbHitValue.text) && wbHitValue.count >= 1, wbHitValue.text.slice(0, 60))
+const wbMissValue = await wbTool.execute({ query: '皮卡丘', limit: 3 })
+ok(
+  '没命中时也返回对象，并明确让模型说记不准（不编）',
+  wbMissValue !== null && typeof wbMissValue === 'object' && wbMissValue.count === 0 && /没有命中/.test(wbMissValue.text),
+  wbMissValue,
+)
+
 // 收摊：这份 fixture 只属于这一段。留在磁盘上的话，后面「重挂」「order 回退」
 // 几段会把世界书 section 也数进去（它们各自 rebase 到同一份 home）。
 await rm(WORLDBOOK_FILE, { force: true })
@@ -783,6 +817,30 @@ const wbGone = makeRes()
 await route.handler(makeReq('POST', '/cyrene/worldbook', JSON.stringify({ action: 'reload' })), wbGone)
 ok('库里没东西时那行索引自动卸掉（不会留一段空话在提示词里）', JSON.parse(wbGone.body).value.count === 0 &&
   liveSections(A).some((spec) => spec.name === 'cyrene:worldbook') === false)
+
+// 检索排序（纯函数，不依赖磁盘）：世界书好不好用，八成取决于这几条规则。
+const wbSample = [
+  { id: 's1', character: '昔涟', category: 'archive', name: '昔涟 · 档案', keys: ['昔涟'], content: '来自：翁法罗斯　城邦：哀丽秘榭　定位：辅助型角色。' },
+  { id: 's2', character: '昔涟', category: 'relation', name: '昔涟 × 白厄', keys: ['白厄', '昔涟'], content: '童年的玩伴，一路同行。' },
+  { id: 's3', character: '阿格莱雅', category: 'relation', name: '阿格莱雅 × 缇宝', keys: ['阿格莱雅', '缇宝'], content: '金织爵与逐火的同行者。' },
+  { id: 's4', character: '白厄', category: 'story', name: '白厄 · 角色故事', keys: ['白厄'], content: '哀丽秘榭的日子仍旧静静流淌。' },
+]
+ok('只写角色名时先给档案（它是总览），而不是随手一条关系', matchEntries(wbSample, '昔涟', 3)[0].id === 's1', matchEntries(wbSample, '昔涟', 3).map((r) => r.id))
+ok(
+  '查询里点名「关系」时，关系条目排在前面',
+  matchEntries(wbSample, '阿格莱雅 关系', 2).every((r) => r.category === 'relation'),
+  matchEntries(wbSample, '阿格莱雅 关系', 2).map((r) => r.name),
+)
+ok(
+  '触发词里没有的地名（哀丽秘榭）退回正文找，且档案仍优先',
+  (() => {
+    const hits = matchEntries(wbSample, '哀丽秘榭', 3)
+    return hits.length === 2 && hits[0].category === 'archive' && hits[0].matched.includes('哀丽秘榭')
+  })(),
+  matchEntries(wbSample, '哀丽秘榭', 3).map((r) => `${r.id}:${r.category}`),
+)
+ok('库里没有的东西就是 0 条（不编）', matchEntries(wbSample, '皮卡丘', 5).length === 0)
+ok('空查询不返回任何条目', matchEntries(wbSample, '   ', 5).length === 0)
 
 // ── 8. order 回退：旧版键 / 完全没有这个键
 const B = makeCtx({ DEPLOYMENT_PERSONA: 0 })
