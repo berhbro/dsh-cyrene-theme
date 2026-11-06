@@ -225,6 +225,13 @@ function makeCtx(options = {}) {
   // 这里照做（否则管理器读不到"现在是什么外观"）。
   const theme = {
     preference: options.themePreference ?? 'light',
+    getTheme() {
+      // 真服务回的是不可变快照：preference 是偏好（可能是 system），active 是解析结果。
+      return {
+        preference: this.preference,
+        active: { colorScheme: this.preference === 'dark' ? 'dark' : 'light' },
+      }
+    },
     setTheme(id) {
       themeCalls.push(id)
       this.preference = id
@@ -1011,6 +1018,11 @@ ok(
 )
 const beforeDim = bootB.calls.length
 const bgDimRange = managerB.querySelector('[data-role="bg-dim"]')
+ok(
+  '淡化滑杆开放到 0–100%（步长 5%）',
+  bgDimRange.attrs.min === '0' && bgDimRange.attrs.max === '1' && bgDimRange.attrs.step === '0.05',
+  bgDimRange.attrs,
+)
 bgDimRange.value = '0.35'
 bgDimRange.dispatch('input')
 ok(
@@ -1031,12 +1043,15 @@ ok(
 // 外观：管理器里一个「浅色 / 深色」总开关（原来每张卡片上的「深色」绑图按钮已经取消）
 const appearanceLightB = managerB.querySelector('[data-role="bg-appearance-light"]')
 const appearanceDarkB = managerB.querySelector('[data-role="bg-appearance-dark"]')
+const appearanceSystemB = managerB.querySelector('[data-role="bg-appearance-system"]')
 ok(
-  '外观是浅色 / 深色两档，进来时「浅色」亮着（body 上没有深色标记）',
-  appearanceLightB !== null && appearanceDarkB !== null &&
-    appearanceLightB.attrs['data-on'] === '1' && appearanceDarkB.attrs['data-on'] === undefined &&
+  '外观是浅色 / 深色 / 跟随系统三档，进来时「浅色」亮着（body 上没有深色标记）',
+  appearanceLightB !== null && appearanceDarkB !== null && appearanceSystemB !== null &&
+    appearanceLightB.attrs['data-on'] === '1' &&
+    appearanceDarkB.attrs['data-on'] === undefined &&
+    appearanceSystemB.attrs['data-on'] === undefined &&
     bootB.doc.body.hasAttribute('data-ds-dark-theme') === false,
-  [appearanceLightB?.attrs['data-on'], appearanceDarkB?.attrs['data-on']],
+  [appearanceLightB?.attrs['data-on'], appearanceDarkB?.attrs['data-on'], appearanceSystemB?.attrs['data-on']],
 )
 const beforeAppearance = bootB.calls.length
 managerB.dispatch('click', { target: appearanceDarkB })
@@ -1061,6 +1076,26 @@ ok(
     appearanceLightB.attrs['data-on'] === '1' && bgPostOf(beforeAppearance) === undefined,
   boxB.themeCalls,
 )
+// 第三档：跟随系统。宿主自己盯着系统的深色开关，插件只负责把偏好交出去。
+managerB.dispatch('click', { target: appearanceSystemB })
+await tick()
+ok(
+  '点「跟随系统」→ setTheme("system")，高亮落在第三档，底下写着现在解析成什么',
+  boxB.themeCalls.length === 3 && boxB.themeCalls[2] === 'system' &&
+    appearanceSystemB.attrs['data-on'] === '1' &&
+    appearanceLightB.attrs['data-on'] === undefined &&
+    appearanceDarkB.attrs['data-on'] === undefined &&
+    /跟随系统/.test(managerB.querySelector('[data-role="appearance-note"]').textContent) &&
+    bgPostOf(beforeAppearance) === undefined,
+  [boxB.themeCalls, managerB.querySelector('[data-role="appearance-note"]').textContent],
+)
+ok(
+  '跟随系统这一档也照旧不写插件的状态文件',
+  boxB.themeCalls.length === 3 && bgPostOf(beforeAppearance) === undefined,
+  boxB.themeCalls,
+)
+managerB.dispatch('click', { target: appearanceLightB })
+await tick()
 // 深浅色和背景图**不绑定**：切外观不换图，选图也不动外观。
 const beforeSwitchImage = activeImage()
 bootB.doc.body.setAttribute('data-ds-dark-theme', '')

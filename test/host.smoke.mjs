@@ -606,8 +606,14 @@ const rb5 = await post({ background: { dim: 5, interval: 3, enabled: 'no', curre
 const clampedBg = JSON.parse(rb5.body).value.background
 ok(
   '脏值一律不写进去：dim / interval 收到区间内，非布尔的开关与带路径的文件名保持原样',
-  clampedBg.dim === 0.85 && clampedBg.interval === 15 && clampedBg.enabled === true && clampedBg.current === '',
+  clampedBg.dim === 1 && clampedBg.interval === 15 && clampedBg.enabled === true && clampedBg.current === '',
   clampedBg,
+)
+const rbNeg = await post({ background: { dim: -3 } })
+ok(
+  '淡化现在开放到 0–100%：负数夹回 0（0 就是照片原样、完全不被盖）',
+  JSON.parse(rbNeg.body).value.background.dim === 0,
+  JSON.parse(rbNeg.body).value.background.dim,
 )
 const rb6 = await post({ background: { enabled: false, rotate: true, interval: 120, dim: 0.4, current: bgFirst.name } })
 const goodBg = JSON.parse(rb6.body).value.background
