@@ -265,7 +265,7 @@ const RESPONSE = {
     enabled: true,
     theme: true,
     defaultPersona: '默认昔涟',
-    statePath: 'C:\\Users\\you\\.dsh\\cyrene-theme.json',
+    statePath: 'C:\\Users\\you\\.dsh\\dsh-theme-cyrene\\cyrene-theme.json',
   },
 }
 
