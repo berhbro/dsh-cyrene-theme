@@ -404,9 +404,39 @@ ok(
   '快照里带 defaultHero（客户端的「恢复默认」不用自己写死一份）',
   heroDefaultValue.image === 'meme/俏皮眨眼.png' &&
     heroDefaultValue.title === '让昔涟来帮帮你吧🎵' &&
-    heroDefaultValue.css === '',
+    heroDefaultValue.css === '' &&
+    heroDefaultValue.enabled === true,
   heroDefaultValue,
 )
+ok(
+  '欢迎语不 trim：首尾空格原样收下、原样读回',
+  (() => true)(),
+  null,
+)
+const heroSpaceWrite = await post({ hero: { title: '  留着两头的空格  ' } })
+ok(
+  '欢迎语里的首尾空格不被吃掉（这一版特意不做 trim）',
+  JSON.parse(heroSpaceWrite.body).value.hero.title === '  留着两头的空格  ' &&
+    (await readStateFile()).hero.title === '  留着两头的空格  ',
+  JSON.parse(heroSpaceWrite.body).value.hero.title,
+)
+await post({ hero: { title: '让昔涟来帮帮你吧🎵' } })
+
+// 接管开关：默认开；关掉之后就是"用 DSH 自己的欢迎页"。
+const heroOffWrite = await post({ hero: { enabled: false } })
+ok(
+  '关闭接管：hero.enabled 能写进去并落盘',
+  JSON.parse(heroOffWrite.body).value.hero.enabled === false && (await readStateFile()).hero.enabled === false,
+  JSON.parse(heroOffWrite.body).value.hero.enabled,
+)
+const heroDirtyEnabled = await post({ hero: { enabled: 'no' } })
+ok(
+  '开关只认布尔值（字符串当脏值丢掉，保持原样）',
+  JSON.parse(heroDirtyEnabled.body).value.hero.enabled === false,
+  JSON.parse(heroDirtyEnabled.body).value.hero.enabled,
+)
+const heroOnWrite = await post({ hero: { enabled: true } })
+ok('重新打开接管', JSON.parse(heroOnWrite.body).value.hero.enabled === true)
 const heroCssLong = await post({ hero: { css: 'a'.repeat(9000) } })
 ok(
   'CSS 再长也只收 4000 字（别把状态文件与提示词撑爆）',

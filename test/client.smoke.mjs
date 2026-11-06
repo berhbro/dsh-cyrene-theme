@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 客户端半自检：不装浏览器，用最小 DOM / react / fetch 桩把 bundle 跑一遍。
  *
  *   node test/client.smoke.mjs
@@ -217,6 +217,7 @@ async function bootstrap(response, options = {}) {
 function makeCtx(options = {}) {
   const registered = []
   const injected = []
+  const disposed = []
   const effects = []
   const themeCalls = []
   // 宿主主题服务（dsh-client-ui-theme 提供）：背景管理器靠 ctx.get('theme') 拿到它，
@@ -245,6 +246,11 @@ function makeCtx(options = {}) {
       inject(name, cb) {
         injected.push(name)
         cb()
+        // 真契约里 inject 回的是"这次注入"的 disposer：欢迎页开关就靠它撤注册，
+        // 让宿主自己的鱼 + 「探索未至之境」回来。
+        return () => {
+          disposed.push(name)
+        }
       },
       register(registration, component) {
         // 模拟「宿主已经在同一优先级占了 single 槽」——真实契约会直接 throw。
@@ -255,7 +261,7 @@ function makeCtx(options = {}) {
       },
     },
   }
-  return { ctx, registered, injected, effects, theme, themeCalls }
+  return { ctx, registered, injected, disposed, effects, theme, themeCalls }
 }
 
 const RESPONSE = {
@@ -299,8 +305,8 @@ boot.exports.apply(box.ctx)
 await tick()
 
 ok(
-  '注册了 7 个 effect（样式 / 欢迎页 CSS / 作用域 / 释放 loader 误标的样式 / 焦点同步 / 背景层 / 活页面取证）',
-  box.effects.length === 7 && box.effects[0].label.endsWith('stylesheet') && box.effects[1].label.endsWith('hero stylesheet') && box.effects[4].label.endsWith('resync on focus') && box.effects[5].label.endsWith('background layer') && box.effects[6].label.endsWith('dom report'),
+  '注册了 8 个 effect（样式 / 欢迎页 CSS / 作用域 / 释放 loader 误标的样式 / 焦点同步 / 背景层 / 活页面取证 / 欢迎页槽位）',
+  box.effects.length === 8 && box.effects[0].label.endsWith('stylesheet') && box.effects[1].label.endsWith('hero stylesheet') && box.effects[4].label.endsWith('resync on focus') && box.effects[5].label.endsWith('background layer') && box.effects[6].label.endsWith('dom report') && box.effects[7].label.endsWith('hero slot'),
   box.effects.map((e) => e.label),
 )
 const style = globalThis.document.head.children[0]
@@ -1771,6 +1777,13 @@ ok(
 
 // 文本 CSS：边写边预览，写进那张独立 <style>；只写声明时自动套到标题文字上。
 const cssInputH = managerH.querySelector('[data-role="hero-css"]')
+ok(
+  'CSS 文本框预填的就是"现在生效的那套"（不是空白），用户改哪行改哪行',
+  cssInputH.value.startsWith('background:linear-gradient(168deg') &&
+    cssInputH.value.includes('-webkit-text-stroke:1.1px #e8699f') &&
+    cssInputH.value.split('\n').length >= 5,
+  cssInputH.value.slice(0, 70),
+)
 cssInputH.value = 'font-size:40px; letter-spacing:2px;'
 cssInputH.dispatch('input')
 ok(
@@ -1811,15 +1824,15 @@ managerH2.dispatch('click', { target: managerH2.querySelector('[data-role="hero-
 await tick()
 const savePatchH = heroPatchOf(beforeSaveH)
 ok(
-  '点保存把文案与 CSS 一起发出去（两端空白都去掉），仍然只带 hero 这一组',
-  savePatchH?.hero?.title === '来一起写点东西吧♪' && savePatchH?.hero?.css === 'font-size:44px;' &&
+  '点保存把文案**原样**发出去（不 trim），CSS 去掉两端空白，仍然只带 hero 这一组',
+  savePatchH?.hero?.title === '  来一起写点东西吧♪  ' && savePatchH?.hero?.css === 'font-size:44px;' &&
     Object.keys(savePatchH.hero).length === 2 && !('persona' in savePatchH),
   savePatchH,
 )
 ok(
-  '存完那张 style 就是新 CSS，预览里的文案也跟着换（末尾音符仍单独一个 span）',
+  '存完那张 style 就是新 CSS，预览里的文案带着首尾空格（音符仍单独一个 span）',
   heroStyleTag.textContent === '.cyre-hero-title-text{font-size:44px;}' &&
-    managerH2.querySelector('[data-role="preview-text"]').textContent === '来一起写点东西吧' &&
+    managerH2.querySelector('[data-role="preview-text"]').textContent === '  来一起写点东西吧  ' &&
     managerH2.querySelector('[data-role="preview-note"]').textContent === '♪',
   [heroStyleTag.textContent, managerH2.querySelector('[data-role="preview-text"]').textContent],
 )
@@ -1847,22 +1860,81 @@ ok(
   managerHImg2?.src,
 )
 
-// 恢复默认：一次性把形象 / 文案 / CSS 都拉回出厂值。
+// 恢复默认：一次性把形象 / 文案 / CSS / 开关都拉回出厂值。
 const beforeResetH = bootH.calls.length
 managerH2.dispatch('click', { target: managerH2.querySelector('[data-role="hero-reset"]') })
 await tick()
 const resetPatchH = heroPatchOf(beforeResetH)
 ok(
-  '「恢复默认」把形象 / 文案 / CSS 三样一起写回默认值',
+  '「恢复默认」把形象 / 文案 / CSS / 接管开关一起写回默认值',
   resetPatchH?.hero?.image === 'meme/俏皮眨眼.png' &&
     resetPatchH?.hero?.title === '让昔涟来帮帮你吧🎵' &&
     resetPatchH?.hero?.css === '' &&
-    Object.keys(resetPatchH.hero).length === 3,
+    resetPatchH?.hero?.enabled === true &&
+    Object.keys(resetPatchH.hero).length === 4,
   resetPatchH?.hero,
 )
 ok(
   '默认值来自宿主半的 defaultHero（不是客户端自己写死一份）',
   (await readFile(CLIENT, 'utf8')).includes('state.defaultHero'),
+)
+
+// 接管开关：关掉 → 撤掉槽位注册（宿主的鱼 + 默认文案才回来），打开 → 再注一次。
+const toggleH = managerH2.querySelector('[data-role="hero-on"]')
+ok('管理器里有「接管欢迎页」开关，默认开着', toggleH !== null && toggleH.checked === true, toggleH?.checked)
+const heroInjections = () => boxH.injected.filter((name) => name === 'conversation.hero.brand.mark').length
+ok(
+  '开机就注入了欢迎页槽位（默认接管）',
+  heroInjections() === 1 && boxH.disposed.length === 0,
+  [boxH.injected, boxH.disposed],
+)
+const beforeOff = bootH.calls.length
+toggleH.checked = false
+toggleH.dispatch('change')
+await tick()
+const offPatchH = heroPatchOf(beforeOff)
+ok(
+  '关掉开关只发 hero.enabled 一个键',
+  offPatchH?.hero?.enabled === false && Object.keys(offPatchH.hero).length === 1,
+  offPatchH,
+)
+ok(
+  '关掉后槽位注册被撤掉（single 槽只要还有注册，宿主就不会渲染自己的兜底）',
+  boxH.disposed.filter((name) => name === 'conversation.hero.brand.mark').length === 1,
+  boxH.disposed,
+)
+ok(
+  '入口概况改成「已关闭（用 DSH 默认欢迎页）」',
+  /已关闭/.test(editorH.querySelector('[data-role="hero-note"]').textContent),
+  editorH.querySelector('[data-role="hero-note"]').textContent,
+)
+ok(
+  '关掉时管理器标上 data-hero-on="off"（预览与候选淡下去，但仍可配置）',
+  managerH2.attrs['data-hero-on'] === 'off' && /\[data-hero-on="off"\]/.test(cssText),
+  managerH2.attrs['data-hero-on'],
+)
+
+const beforeOn = bootH.calls.length
+toggleH.checked = true
+toggleH.dispatch('change')
+await tick()
+ok(
+  '重新打开就再注一次（不用重载插件行）',
+  heroPatchOf(beforeOn)?.hero?.enabled === true && heroInjections() === 2 && managerH2.attrs['data-hero-on'] === 'on',
+  [heroPatchOf(beforeOn), heroInjections()],
+)
+
+// 文本 CSS 的默认值：原样存回去时按空串存，别把默认样式"冻"进状态里。
+const beforeDefaultCss = bootH.calls.length
+managerH2.querySelector('[data-role="hero-css-default"]').dispatch('click', {
+  target: managerH2.querySelector('[data-role="hero-css-default"]'),
+})
+managerH2.dispatch('click', { target: managerH2.querySelector('[data-role="hero-save"]') })
+await tick()
+ok(
+  '「填回默认样式」后再保存：CSS 按空串存（继续跟插件默认走，而不是冻住一份快照）',
+  heroPatchOf(beforeDefaultCss)?.hero?.css === '',
+  heroPatchOf(beforeDefaultCss),
 )
 
 console.log(`\n${failures.length === 0 ? 'PASS' : 'FAIL'}  ${passed}/${passed + failures.length}`)
