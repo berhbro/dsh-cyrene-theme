@@ -7,7 +7,7 @@
  *      enabled/空白 persona 的处理、404、超大请求体、跨"重启"读取磁盘设定。
  */
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -19,6 +19,7 @@ process.env.DSH_HOME = home
 // 否则会读到（也会写脏）本机真实上传的那些图。
 process.env.CYRENE_CUSTOM_STICKER_DIR = join(home, 'stickers-custom')
 process.env.CYRENE_CUSTOM_BACKGROUND_DIR = join(home, 'backgrounds-custom')
+process.env.CYRENE_HERO_CUSTOM_DIR = join(home, 'hero-custom')
 // 打开文件管理器那条路由在自检里不能真的弹窗。
 process.env.CYRENE_NO_REVEAL = '1'
 const MOD = new URL('../lib/index.js', import.meta.url).href
@@ -377,6 +378,69 @@ async function writeTo(path, payload) {
   return r
 }
 const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8AAAwAB/wD/AAABAAElEQVR4nGP4//8/AwAI/AL+8V2SAAAAAElFTkSuQmCC'
+
+// ── 7d-2. 欢迎页管理：文案 / 自定义 CSS / 自己的形象
+const heroCssWrite = await post({ hero: { css: '  font-size:40px;\nletter-spacing:2px;  ' } })
+const heroCssValue = JSON.parse(heroCssWrite.body).value.hero
+ok(
+  '欢迎语的自定义 CSS 能写进去（原样保留，只去两端空白）',
+  heroCssWrite.statusCode === 200 && heroCssValue.css === 'font-size:40px;\nletter-spacing:2px;',
+  heroCssValue.css,
+)
+ok('自定义 CSS 已落盘', (await readStateFile()).hero.css === 'font-size:40px;\nletter-spacing:2px;')
+const heroDefaultValue = JSON.parse(heroCssWrite.body).value.defaultHero
+ok(
+  '快照里带 defaultHero（客户端的「恢复默认」不用自己写死一份）',
+  heroDefaultValue.image === 'meme/俏皮眨眼.png' &&
+    heroDefaultValue.title === '让昔涟来帮帮你吧🎵' &&
+    heroDefaultValue.css === '',
+  heroDefaultValue,
+)
+const heroCssLong = await post({ hero: { css: 'a'.repeat(9000) } })
+ok(
+  'CSS 再长也只收 4000 字（别把状态文件与提示词撑爆）',
+  JSON.parse(heroCssLong.body).value.hero.css.length === 4000,
+  JSON.parse(heroCssLong.body).value.hero.css.length,
+)
+const heroCssClear = await post({ hero: { css: '' } })
+ok('清空 CSS 也是普通写入', JSON.parse(heroCssClear.body).value.hero.css === '', JSON.parse(heroCssClear.body).value.hero.css)
+
+const heroUp = await writeTo('/cyrene/hero', { name: 'mine.png', data: 'data:image/png;base64,' + PNG_B64 })
+const heroUpValue = JSON.parse(heroUp.body).value.state.hero
+ok(
+  '上传自己的形象：状态换成 hero-custom/ 的记号，并且立刻可用',
+  heroUp.statusCode === 200 && heroUpValue.image === 'hero-custom/hero.png' && heroUpValue.ready === true && typeof heroUpValue.stamp === 'string' && heroUpValue.stamp !== '',
+  [heroUp.statusCode, heroUpValue],
+)
+const heroUpFile = makeRes()
+await route.handler(makeReq('GET', '/cyrene/hero'), heroUpFile)
+ok(
+  '上传的那张能从 /cyrene/hero 读到字节',
+  heroUpFile.statusCode === 200 && heroUpFile.bytes.length === Buffer.from(PNG_B64, 'base64').length && heroUpFile.headers['Content-Type'] === 'image/png',
+  [heroUpFile.statusCode, heroUpFile.bytes.length],
+)
+ok(
+  '自定义形象落盘时只存记号（不把绝对路径写进状态文件）',
+  (await readStateFile()).hero.image === 'hero-custom/hero.png',
+  (await readStateFile()).hero.image,
+)
+const heroUpAgain = await writeTo('/cyrene/hero', { name: 'mine.jpg', data: 'data:image/png;base64,' + PNG_B64 })
+ok(
+  '再传一张：目录里仍然只有一份（旧的会被清掉）',
+  heroUpAgain.statusCode === 200 && JSON.parse(heroUpAgain.body).value.state.hero.image === 'hero-custom/hero.png' &&
+    (await readdir(process.env.CYRENE_HERO_CUSTOM_DIR)).length === 1,
+  JSON.parse(heroUpAgain.body).value.state.hero,
+)
+const heroBadType = await writeTo('/cyrene/hero', { name: 'x.txt', data: 'data:text/plain;base64,AAAA' })
+ok('形象类型不认识 → 400 bad-type', heroBadType.statusCode === 400 && JSON.parse(heroBadType.body).error.code === 'bad-type', heroBadType.statusCode)
+const heroBadImg = await writeTo('/cyrene/hero', { name: 'x.png', data: 'not-a-data-url' })
+ok('形象不是 data URL → 400 bad-image', heroBadImg.statusCode === 400 && JSON.parse(heroBadImg.body).error.code === 'bad-image', heroBadImg.statusCode)
+const heroTrav = await post({ hero: { image: 'hero-custom/../package.json' } })
+ok('自定义记号也不许带路径穿越（未就绪，不是 500）', JSON.parse(heroTrav.body).value.hero.ready === false, JSON.parse(heroTrav.body).value.hero)
+// 收尾：把形象 / 文案 / CSS 一起放回默认，后面的段落只看 theme 与 rev。
+await post({ hero: { image: 'meme/俏皮眨眼.png', title: '让昔涟来帮帮你吧🎵', css: '' } })
+ok('恢复默认三样都回得去', (await readStateFile()).hero.image === 'meme/俏皮眨眼.png' && (await readStateFile()).hero.css === '')
+
 const m0 = JSON.parse((await get()).body).value
 ok(
   'state 带 stickerSize=96 与空的 customStickers',
@@ -393,6 +457,12 @@ ok(
   upValue.state.customStickers,
 )
 ok('自定义项带上 label / when', upValue.state.customStickers[0].label === '自定的' && upValue.state.customStickers[0].when === '测试用', upValue.state.customStickers[0])
+ok(
+  '清单里包内贴纸都带「包内相对路径」（欢迎页可以直接拿它当形象），改道到包外的自传项没有',
+  upValue.stickers.items.filter((it) => it.custom !== true).every((it) => typeof it.path === 'string' && it.path.startsWith('meme/')) &&
+    upValue.stickers.items.filter((it) => it.custom === true).every((it) => it.path === null),
+  upValue.stickers.items.map((it) => [it.id, it.path]),
+)
 const upFile = makeRes()
 await route.handler(makeReq('GET', `/cyrene/sticker/${upId}`), upFile)
 ok(
@@ -469,6 +539,11 @@ ok(
   bgList.items.every((it) => typeof it.id === 'string' && it.id !== '' && typeof it.type === 'string' && it.bytes > 0 &&
     it.url === '/cyrene/background/' + encodeURIComponent(it.id)),
   bgList.items[0],
+)
+ok(
+  '背景清单也带 path（照片可以整张拿来当欢迎页形象）',
+  bgList.items.every((it) => typeof it.path === 'string' && it.path.startsWith('Background/')),
+  bgList.items.map((it) => it.path),
 )
 const bgFirst = bgList.items[0]
 const rb2 = makeRes()
@@ -873,6 +948,8 @@ ok('重启后旧 rev 依然被拒（不会把主题翻回来）', rDStale.status
 const rDOk = makeRes()
 await routeD.handler(makeReq('POST', '/cyrene/state', JSON.stringify({ rev: jD.rev, theme: true })), rDOk)
 ok('带对 rev 的写入照常成功并再自增', rDOk.statusCode === 200 && JSON.parse(rDOk.body).value.rev === jD.rev + 1, rDOk.statusCode)
+
+
 
 await rm(home, { recursive: true, force: true })
 

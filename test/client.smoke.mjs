@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 客户端半自检：不装浏览器，用最小 DOM / react / fetch 桩把 bundle 跑一遍。
  *
  *   node test/client.smoke.mjs
@@ -299,13 +299,19 @@ boot.exports.apply(box.ctx)
 await tick()
 
 ok(
-  '注册了 6 个 effect（样式 / 作用域 / 释放 loader 误标的样式 / 焦点同步 / 背景层 / 活页面取证）',
-  box.effects.length === 6 && box.effects[0].label.endsWith('stylesheet') && box.effects[3].label.endsWith('resync on focus') && box.effects[4].label.endsWith('background layer') && box.effects[5].label.endsWith('dom report'),
+  '注册了 7 个 effect（样式 / 欢迎页 CSS / 作用域 / 释放 loader 误标的样式 / 焦点同步 / 背景层 / 活页面取证）',
+  box.effects.length === 7 && box.effects[0].label.endsWith('stylesheet') && box.effects[1].label.endsWith('hero stylesheet') && box.effects[4].label.endsWith('resync on focus') && box.effects[5].label.endsWith('background layer') && box.effects[6].label.endsWith('dom report'),
   box.effects.map((e) => e.label),
 )
 const style = globalThis.document.head.children[0]
 ok('样式表进了 head', style?.tagName === 'style')
 ok('样式表带 data-plugin-css（防 loader 误删）', style?.attrs['data-plugin-css'] === PACKAGE_ID, style?.attrs)
+const heroStyle = globalThis.document.head.children[1]
+ok(
+  '欢迎语的自定义 CSS 是另一张 style（同一标记 + -hero 后缀，空内容时等于没有）',
+  heroStyle?.tagName === 'style' && heroStyle?.attrs['data-plugin-css'] === PACKAGE_ID + '-hero' && heroStyle?.textContent === '',
+  [heroStyle?.attrs, heroStyle?.textContent],
+)
 ok('CSS 含作用域属性与毛玻璃', /\[data-dsh-cyrene\]/.test(style?.textContent ?? '') && /backdrop-filter/.test(style?.textContent ?? ''))
 
 // 回归保护：AppFrame 的 overlayLayer（[data-shell-overlay]，position:absolute;inset:0;z-index:20，
@@ -1626,6 +1632,237 @@ ok(
     heroOffTitle.children[0].children[0] === '昔涟在呢' &&
     !heroOffTitle.children.some((child) => child && child.props?.className === 'cyre-hero-note'),
   heroOffEl.children.map((c) => c && c.type),
+)
+
+// ── 6f. 欢迎页管理：形象 / 欢迎语 / 文本自定义 CSS
+// 形象候选直接从表情包 + 背景图两份清单来（宿主半给每张图带 path），所以假宿主
+// 也照真形状给 path；写操作走 /cyrene/state（改设定）与 POST /cyrene/hero（上传）。
+const HERO_STATE = {
+  image: 'meme/俏皮眨眼.png',
+  title: '让昔涟来帮帮你吧🎵',
+  css: '',
+  ready: true,
+  url: '/cyrene/hero',
+  stamp: 'z9-1k',
+}
+const DEFAULT_HERO_STATE = { image: 'meme/俏皮眨眼.png', title: '让昔涟来帮帮你吧🎵', css: '' }
+const HERO_STICKERS = {
+  ok: true,
+  value: {
+    version: 1,
+    maxPerTurn: 1,
+    enabled: true,
+    missing: [],
+    items: [
+      { id: 'happy', label: '超开心', when: '', type: 'image/png', bytes: 10, url: '/cyrene/sticker/happy', path: 'meme/超开心.png' },
+      { id: 'wink', label: '俏皮眨眼', when: '', type: 'image/png', bytes: 10, url: '/cyrene/sticker/wink', path: 'meme/俏皮眨眼.png' },
+    ],
+  },
+}
+const HERO_BACKGROUNDS = {
+  ok: true,
+  value: {
+    error: null,
+    folder: 'Background',
+    items: [{ id: 'a.jpeg', name: 'a.jpeg', type: 'image/jpeg', bytes: 10, url: '/cyrene/background/a.jpeg', path: 'Background/a.jpeg' }],
+  },
+}
+let heroLive = { ...HERO_STATE }
+let heroRev = 11
+const heroStateValue = () => ({ ...REV7.value, rev: heroRev, hero: { ...heroLive }, defaultHero: DEFAULT_HERO_STATE })
+const bootH = await bootstrap((call) => {
+  if (call.url.endsWith('/cyrene/report')) return { status: 200, payload: { ok: true, value: { at: 'now' } } }
+  if (call.url.includes('/cyrene/stickers')) return { status: 200, payload: HERO_STICKERS }
+  if (call.url.includes('/cyrene/backgrounds')) return { status: 200, payload: HERO_BACKGROUNDS }
+  if (call.url.endsWith('/cyrene/hero') && call.method === 'POST') {
+    // 上传形象：宿主半落盘后把 state.hero.image 换成自定义记号，版本戳也跟着变。
+    heroRev += 1
+    heroLive = { ...heroLive, image: 'hero-custom/hero.png', stamp: 'zz-2k' }
+    return { status: 200, payload: { ok: true, value: { state: heroStateValue() } } }
+  }
+  if (call.method === 'POST') {
+    const patch = JSON.parse(call.body)
+    heroRev += 1
+    heroLive = { ...heroLive, ...(patch.hero ?? null) }
+    return { status: 200, payload: { ok: true, value: heroStateValue() } }
+  }
+  return { status: 200, payload: { ok: true, value: heroStateValue() } }
+}, { autoHost: true })
+const boxH = makeCtx()
+bootH.exports.apply(boxH.ctx)
+await tick()
+boxH.registered.find((r) => r.registration.id === 'cyrene-theme').component()
+await tick()
+const editorH = bootH.refs[0].current.children[0]
+const docH = bootH.doc
+const heroStyleTag = docH.head.children[1]
+
+const nodesH = editorH.descendants()
+const indexOfRole = (role) => nodesH.findIndex((el) => el.attrs['data-role'] === role)
+ok(
+  '设置页在「背景图管理」下面多了一行「欢迎页」入口（概况 + 打开设置）',
+  indexOfRole('open-hero') !== -1 &&
+    indexOfRole('open-hero') > indexOfRole('open-backgrounds') &&
+    editorH.querySelector('[data-role="hero-preview"]') === null &&
+    editorH.querySelector('[data-role="hero-grid"]') === null,
+  [indexOfRole('open-backgrounds'), indexOfRole('open-hero'), nodesH.map((el) => el.attrs['data-role']).filter(Boolean)],
+)
+const heroNoteH = editorH.querySelector('[data-role="hero-note"]')
+ok(
+  '入口概况写的是「欢迎语 + 形象文件名」（有自定义样式时再加一句）',
+  /让昔涟来帮帮你吧🎵/.test(heroNoteH.textContent) && /俏皮眨眼\.png/.test(heroNoteH.textContent) && !/自定义样式/.test(heroNoteH.textContent),
+  heroNoteH.textContent,
+)
+
+// 打开管理器：整页覆盖层挂 body，和表情包 / 背景图同一套壳。
+editorH.dispatch('click', { target: editorH.querySelector('[data-role="open-hero"]') })
+await tick()
+const pageH = docH.body.descendants().find((el) => el.className === 'cyre-overlay cyre-overlay--wide')
+ok(
+  '点入口打开欢迎页管理器（挂在 body 上的覆盖层）',
+  pageH !== undefined && pageH !== null && pageH.attrs['aria-label'] === '昔涟 · 欢迎页',
+  docH.body.descendants().map((el) => el.className),
+)
+const managerH = pageH.descendants().find((el) => el.className === 'cyre-manager')
+const cardsH = managerH.descendants().filter((el) => el.attrs['data-role'] === 'hero-pick')
+ok(
+  '形象候选 = 表情包贴纸 + 背景图照片（各自带 path 与「贴纸 / 照片」标签）',
+  cardsH.length === 3 &&
+    cardsH[0].attrs['data-path'] === 'meme/超开心.png' &&
+    cardsH[2].attrs['data-path'] === 'Background/a.jpeg' &&
+    cardsH[2].descendants().some((el) => el.tagName === 'em' && el.textContent === '照片') &&
+    cardsH[0].descendants().some((el) => el.tagName === 'em' && el.textContent === '贴纸'),
+  cardsH.map((el) => [el.attrs['data-path'], el.title]),
+)
+ok(
+  '当前形象那张是亮着的（其余不亮）',
+  cardsH[1].attrs['data-on'] === '1' && cardsH[0].attrs['data-on'] === undefined && cardsH[2].attrs['data-on'] === undefined,
+  cardsH.map((el) => [el.attrs['data-path'], el.attrs['data-on']]),
+)
+const managerHImg = managerH.querySelector('[data-role="preview-mark"]')
+ok(
+  '预览里的形象地址带着版本戳（换图后 <img> 不会端缓存里的旧图）',
+  String(managerHImg.src).endsWith('/cyrene/hero?v=z9-1k'),
+  managerHImg?.src,
+)
+
+const heroPostOf = (from) => bootH.calls.slice(from).find((c) => c.method === 'POST' && c.url.endsWith('/cyrene/state'))
+const heroPatchOf = (from) => {
+  const call = heroPostOf(from)
+  return call === undefined ? null : JSON.parse(call.body)
+}
+
+const beforePickH = bootH.calls.length
+managerH.dispatch('click', { target: cardsH[0] })
+await tick()
+const pickPatchH = heroPatchOf(beforePickH)
+ok(
+  '点一张卡片只发 hero.image 一个键（带 rev，不回写文案 / 其它设定）',
+  pickPatchH?.rev === 11 && pickPatchH?.hero?.image === 'meme/超开心.png' &&
+    Object.keys(pickPatchH.hero).length === 1 && !('persona' in pickPatchH) && !('theme' in pickPatchH) && !('background' in pickPatchH),
+  pickPatchH,
+)
+ok(
+  '换完形象，高亮跟着走（预览图仍走 /cyrene/hero 的字节路由）',
+  cardsH[0].attrs['data-on'] === '1' && cardsH[1].attrs['data-on'] === undefined &&
+    /\/cyrene\/hero/.test(String(managerHImg.src)),
+  [cardsH.map((el) => el.attrs['data-on']), managerHImg?.src],
+)
+
+// 文本 CSS：边写边预览，写进那张独立 <style>；只写声明时自动套到标题文字上。
+const cssInputH = managerH.querySelector('[data-role="hero-css"]')
+cssInputH.value = 'font-size:40px; letter-spacing:2px;'
+cssInputH.dispatch('input')
+ok(
+  '只写声明时，自动包成 .cyre-hero-title-text{…} 落到欢迎页那张 style 上（立刻看得见效果）',
+  heroStyleTag.textContent === '.cyre-hero-title-text{font-size:40px; letter-spacing:2px;}',
+  heroStyleTag.textContent,
+)
+cssInputH.value = '.cyre-hero-title-text{color:#123456}'
+cssInputH.dispatch('input')
+ok(
+  '写了 { } 的当成整条规则原样追加（高级用法，作用域自负）',
+  heroStyleTag.textContent === '.cyre-hero-title-text{color:#123456}',
+  heroStyleTag.textContent,
+)
+
+// 没保存就关掉：预览时临时写进去的 CSS 要还原成状态里那份（这里本来是空的）。
+const closeH = pageH.descendants().find((el) => el.tagName === 'button' && el.attrs['aria-label'] === '关闭')
+closeH.dispatch('click')
+ok(
+  '点 ✕ 关掉管理器页，未保存的 CSS 预览被还原（覆盖层也从 body 上摘掉）',
+  docH.body.descendants().find((el) => el.className === 'cyre-overlay cyre-overlay--wide') === undefined &&
+    heroStyleTag.textContent === '',
+  heroStyleTag.textContent,
+)
+
+// 再来一次：改文案 + 存 CSS
+editorH.dispatch('click', { target: editorH.querySelector('[data-role="open-hero"]') })
+await tick()
+const pageH2 = docH.body.descendants().find((el) => el.className === 'cyre-overlay cyre-overlay--wide')
+const managerH2 = pageH2.descendants().find((el) => el.className === 'cyre-manager')
+const cardsH2 = managerH2.descendants().filter((el) => el.attrs['data-role'] === 'hero-pick')
+const titleInputH = managerH2.querySelector('[data-role="hero-title"]')
+const cssInputH2 = managerH2.querySelector('[data-role="hero-css"]')
+titleInputH.value = '  来一起写点东西吧♪  '
+cssInputH2.value = '  font-size:44px;  '
+const beforeSaveH = bootH.calls.length
+managerH2.dispatch('click', { target: managerH2.querySelector('[data-role="hero-save"]') })
+await tick()
+const savePatchH = heroPatchOf(beforeSaveH)
+ok(
+  '点保存把文案与 CSS 一起发出去（两端空白都去掉），仍然只带 hero 这一组',
+  savePatchH?.hero?.title === '来一起写点东西吧♪' && savePatchH?.hero?.css === 'font-size:44px;' &&
+    Object.keys(savePatchH.hero).length === 2 && !('persona' in savePatchH),
+  savePatchH,
+)
+ok(
+  '存完那张 style 就是新 CSS，预览里的文案也跟着换（末尾音符仍单独一个 span）',
+  heroStyleTag.textContent === '.cyre-hero-title-text{font-size:44px;}' &&
+    managerH2.querySelector('[data-role="preview-text"]').textContent === '来一起写点东西吧' &&
+    managerH2.querySelector('[data-role="preview-note"]').textContent === '♪',
+  [heroStyleTag.textContent, managerH2.querySelector('[data-role="preview-text"]').textContent],
+)
+
+// 上传自己的图：走 POST /cyrene/hero，回来之后形象路径与版本戳都换新。
+const fileH = managerH2.querySelector('[data-role="hero-file"]')
+fileH.files = [{ name: 'mine.png' }]
+const beforeUploadH = bootH.calls.length
+managerH2.querySelector('[data-role="hero-upload"]').dispatch('click', {
+  target: managerH2.querySelector('[data-role="hero-upload"]'),
+})
+await tick()
+await tick()
+const uploadCall = bootH.calls.slice(beforeUploadH).find((c) => c.method === 'POST' && c.url.endsWith('/cyrene/hero'))
+ok(
+  '上传形象走 POST /cyrene/hero（带 rev + data URL），不是从页面直接写文件',
+  uploadCall !== undefined && JSON.parse(uploadCall.body).rev === heroRev - 1 &&
+    JSON.parse(uploadCall.body).data === 'data:image/png;base64,AAAA',
+  uploadCall?.body,
+)
+const managerHImg2 = managerH2.querySelector('[data-role="preview-mark"]')
+ok(
+  '上传完形象路径换成自定义记号、预览地址带上新版本戳',
+  /\/cyrene\/hero\?v=zz-2k$/.test(String(managerHImg2.src)) && cardsH2.every((el) => el.attrs['data-on'] === undefined),
+  managerHImg2?.src,
+)
+
+// 恢复默认：一次性把形象 / 文案 / CSS 都拉回出厂值。
+const beforeResetH = bootH.calls.length
+managerH2.dispatch('click', { target: managerH2.querySelector('[data-role="hero-reset"]') })
+await tick()
+const resetPatchH = heroPatchOf(beforeResetH)
+ok(
+  '「恢复默认」把形象 / 文案 / CSS 三样一起写回默认值',
+  resetPatchH?.hero?.image === 'meme/俏皮眨眼.png' &&
+    resetPatchH?.hero?.title === '让昔涟来帮帮你吧🎵' &&
+    resetPatchH?.hero?.css === '' &&
+    Object.keys(resetPatchH.hero).length === 3,
+  resetPatchH?.hero,
+)
+ok(
+  '默认值来自宿主半的 defaultHero（不是客户端自己写死一份）',
+  (await readFile(CLIENT, 'utf8')).includes('state.defaultHero'),
 )
 
 console.log(`\n${failures.length === 0 ? 'PASS' : 'FAIL'}  ${passed}/${passed + failures.length}`)
