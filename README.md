@@ -21,10 +21,11 @@
 | 侧边栏编辑 | 客户端半向 `sidebar.footer.action` 注册「✦ 昔涟」按钮（点开浮动面板），并额外向 `settings.section` 注册一整页「昔涟 · 主题」，两处用的是同一个编辑器。 |
 | 表情包 | 素材放在包内 `meme/` 下（文件名就是表情名字），`stickers.json` 是清单（id / 名称 / 什么时候用 / 文件）。宿主半把清单折算成一段附在人格之后的「【表情包】」说明——**每张图的绝对路径整行写好**，模型直接照抄（路径里带括号、空格或非 ASCII 时，自己拼很容易抄错）——并开两条只读路由：`GET /cyrene/stickers`（清单，支持 `?reload=1`）与 `GET /cyrene/sticker/<id>`（图片字节，带 `ETag`/304）。设置页里能看到缩略图与「允许发表情包」开关；关掉后这段说明就从系统提示词里消失。 |
 | 表情包管理 | 面板里只有一行**入口**（「✦ 表情包管理　N 张」+「打开管理器」），点开是一整页**管理器**（挂在 `body` 上的覆盖层，Escape 或右上「关闭」退出）：里面**加图**（选文件 → 转成 data URL → `POST /cyrene/stickers`）、**删图**（只删自己加的，`POST /cyrene/stickers/remove`）、**调大小**（48–240px 滑杆，落进 `state.stickerSize`）。页面本身封顶 + 内层滚动，素材不会撑出管理器范围。自添加的图落在 `stickers-custom/`（gitignore，属运行时数据），条目存在状态文件的 `customStickers` 里，与包内清单合并成同一份「【表情包】」说明——**加完立刻能贴**，不用重载插件行。 |
-| 背景图 | 两处素材来源：随包的 `Background/`（自己丢图进去）和面板里上传的 `backgrounds-custom/`。宿主半扫描两边（`GET /cyrene/backgrounds`，支持 `?reload=1`）、按文件名把字节发出去（`GET /cyrene/background/<文件名>`，与表情包同一套响应头），并开 `POST /cyrene/backgrounds`（上传）、`POST /cyrene/backgrounds/remove`（只删自传的）。客户端半在 `body` 上挂一层 `.cyre-bg`（`position:fixed;inset:0;z-index:-1;pointer-events:none`）：两层图交叉淡入 + 一层色纱，有图时铺满视口；**整列对话区不刷白**，照片直接透上来，只把用户气泡的底色调厚、再给正文一圈淡光晕。控制板里只留一行**入口**（「✦ 背景图管理　N 张」+「打开管理器」）；管理器是一整页覆盖层：顶部的**外观两档「浅色 / 深色」**（调宿主自己的主题服务，整个应用跟着换）、「背景图 / 简约（无图）」二选一、上传、点缩略图选起点、开自动轮换（15–3600 秒）、拖浓度（0.2–0.85）、删掉自传的图。详见「背景图」。 |
-| 长期记忆 | 记忆存在**自己的文件**里（`$DSH_HOME/cyrene-memory.json`，和设定分开——它会长大，而设定必须保持小且可重置），宿主半开四条路由：`GET /cyrene/memory`（清单 + 记忆自己的 `rev`）、`POST /cyrene/memory`（`add` / `remove` / `clear` / `toggle`，同样带 `rev` 的乐观并发，缺 `rev` → 400、过期 → 409）、`GET /cyrene/memory/raw`（`text/plain` 原文，浏览器里直接看得到）、`POST /cyrene/memory/reveal`（让宿主在系统文件管理器里定位那个 JSON）。另注册三个工具给模型：`cyrene_memory_add`、`cyrene_memory_search`、`cyrene_memory_forget`；记忆正文以独立 section（`cyrene:memory`，排在人格之后 20）注入系统提示词，有 **2600 字预算**、按时间倒序，超出预算的老条目不再进提示词（但留在文件里、搜索照样找得到）。控制板里只留一行**入口**（「✦ 长期记忆　N 条」+「打开管理器」），管理器是一整页覆盖层：启用开关、搜索、手动加一条、删单条、清空。宿主没有 `tools` 服务时工具整块安静跳过，注入与面板照常。 |
-| 世界书 | 世界设定库（翁法罗斯的角色档案 / 故事 / 关系 / 解析）单独存在 **`$DSH_HOME/cyrene-worldbook.json`**，随包的 `tools/build-worldbook.mjs` 能从官方 wiki 接口一键抓取并转换（默认写到同一个位置）。宿主半只往系统提示词里注入**一行索引**（700 字内：库里有哪几位角色、该用哪个工具查），正文由 `cyrene_worldbook_search` 按关键词取回；面板里只有「多大 / 什么时候抓的 / 文件在哪」三个动作：抓取 / 更新、打开文件位置、清空——**抓到的条目不铺在管理器里**。 |
-| 持久化 | 宿主半自带 fenced 路由 `/cyrene/state`（GET 读 / POST 写），落盘到 `$DSH_HOME/cyrene-theme.json`（默认 `~/.dsh/cyrene-theme.json`）。写入走**乐观并发**：写请求必须带上 GET 拿到的 `rev`，缺 `rev`（旧版客户端半 / 手搓脚本）→ 400 `client-outdated`，`rev` 过期 → 409 `stale` —— 没刷新的旧页面不可能再把别处的改动盖回去。 |
+| 背景图 | 两处素材来源：随包的 `Background/`（自己丢图进去）和面板里上传的 `backgrounds-custom/`。宿主半扫描两边（`GET /cyrene/backgrounds`，支持 `?reload=1`）、按文件名把字节发出去（`GET /cyrene/background/<文件名>`，与表情包同一套响应头），并开 `POST /cyrene/backgrounds`（上传）、`POST /cyrene/backgrounds/remove`（只删自传的）。客户端半在 `body` 上挂一层 `.cyre-bg`（`position:fixed;inset:0;z-index:-1;pointer-events:none`）：两层图交叉淡入 + 一层色纱，有图时铺满视口；**整列对话区不刷白**，照片直接透上来，只把用户气泡的底色调厚、再给正文一圈淡光晕。控制板里只留一行**入口**（「✦ 背景图管理　N 张」+「打开管理器」）；管理器是一整页覆盖层：顶部的**外观三档「浅色 / 深色 / 跟随系统」**（调宿主自己的主题服务，整个应用跟着换）、「背景图 / 简约（无图）」二选一、上传、点缩略图选起点、开自动轮换（15–3600 秒）、拖浓度（0–1，0＝照片原样、1＝盖回渐变底）、删掉自传的图。详见「背景图」。 |
+| 欢迎页 | 新会话那一行（形象 + 艺术字欢迎语）可在面板里改：**接管开关**（关掉就撤掉槽位注册，回到 DSH 自己的鱼 + 「探索未至之境」）、**形象**从现成素材里点选（表情包贴纸 / 背景图照片）或自己上传（`POST /cyrene/hero`，落进 `hero-custom/`，同时只留一张）、**欢迎语**存 `hero.title`（不 trim）、**文本自定义 CSS** 存 `hero.css`（文本框预填当前默认样式；只写声明→自动包成 `.cyre-hero-title-text{…}`；含 `{ }`→当整条规则追加），另有一页带实时预览的管理器。字节仍由 `GET /cyrene/hero` 发（`ETag`/304），换图靠 `hero.stamp` 换 `<img>` 地址。 |
+| 长期记忆 | 记忆存在**自己的文件**里（`$DSH_HOME/dsh-theme-cyrene/cyrene-memory.json`，和设定分开——它会长大，而设定必须保持小且可重置），宿主半开四条路由：`GET /cyrene/memory`（清单 + 记忆自己的 `rev`）、`POST /cyrene/memory`（`add` / `remove` / `clear` / `toggle`，同样带 `rev` 的乐观并发，缺 `rev` → 400、过期 → 409）、`GET /cyrene/memory/raw`（`text/plain` 原文，浏览器里直接看得到）、`POST /cyrene/memory/reveal`（让宿主在系统文件管理器里定位那个 JSON）。另注册三个工具给模型：`cyrene_memory_add`、`cyrene_memory_search`、`cyrene_memory_forget`；记忆正文以独立 section（`cyrene:memory`，排在人格之后 20）注入系统提示词，有 **2600 字预算**、按时间倒序，超出预算的老条目不再进提示词（但留在文件里、搜索照样找得到）。控制板里只留一行**入口**（「✦ 长期记忆　N 条」+「打开管理器」），管理器是一整页覆盖层：启用开关、搜索、手动加一条、删单条、清空。宿主没有 `tools` 服务时工具整块安静跳过，注入与面板照常。 |
+| 世界书 | 世界设定库（翁法罗斯的角色档案 / 故事 / 关系 / 解析）单独存在 **`$DSH_HOME/dsh-theme-cyrene/cyrene-worldbook.json`**，随包的 `tools/build-worldbook.mjs` 能从官方 wiki 接口一键抓取并转换（默认写到同一个位置）。宿主半只往系统提示词里注入**一行索引**（700 字内：库里有哪几位角色、该用哪个工具查），正文由 `cyrene_worldbook_search` 按关键词取回；面板里只有「多大 / 什么时候抓的 / 文件在哪」三个动作：抓取 / 更新、打开文件位置、清空——**抓到的条目不铺在管理器里**。 |
+| 持久化 | 宿主半自带 fenced 路由 `/cyrene/state`（GET 读 / POST 写），落盘到**插件自己的数据目录** `$DSH_HOME/dsh-theme-cyrene/cyrene-theme.json`（默认 `~/.dsh/dsh-theme-cyrene/cyrene-theme.json`，和记忆、世界书放在同一个目录里，不再往 `.dsh` 根上撒文件）。写入走**乐观并发**：写请求必须带上 GET 拿到的 `rev`，缺 `rev`（旧版客户端半 / 手搓脚本）→ 400 `client-outdated`，`rev` 过期 → 409 `stale` —— 没刷新的旧页面不可能再把别处的改动盖回去。 |
 | 对话界面 | **新会话欢迎页**：客户端半占用 `conversation.hero.brand.mark` 这个单占位槽（官方 brand 包不占它，默认渲染才是那个动态鱼；DSH Desktop 的桌面模块在 p0 占着同一个槽，所以本包用 `priority:-1` 盖住），改成昔涟的整张贴纸（带 alpha 的 Q 版立绘，不画边框底盘）+ 一句粉白渐变艺术字欢迎语，整行是纯装饰（点不响、选不中、拖不动）；贴纸字节走宿主半的 `GET /cyrene/hero`，图片路径来自 `state.hero.image`。**输入框占位提示**：原生那句写在 `[data-composer-placeholder]` 的文本节点里、没有 i18n 覆盖的口子，所以用纯 CSS（把原字染透明 + 自己的 `::after` 写一句「有问题？有任务？来找昔涟♪」）替换，不动 DOM、不碰宿主词典。**悬浮毛玻璃**：输入框卡片的 `backdrop-filter` 画在 `::before` 上而不是卡片本身，否则会破坏发送键那个未开 portal 的 fixed Tooltip 的定位、鼠标停上去时界面闪烁（详见「已知坑」）。详见「对话界面微调」。 |
 
 ## 安装
@@ -61,7 +62,7 @@ dsh plugin --profile desktop add github:berhbro/dsh-cyrene-theme
 
 ![浅色主题](https://raw.githubusercontent.com/berhbro/dsh-cyrene-theme/main/docs/screenshots/LightTheme.png)
 
-控制板（设置 → 昔涟 · 主题：人格底稿与三个开关）与背景管理器（外观两档 / 二选一 / 轮换 / 间隔 / 淡化 / 缩略图）：
+控制板（设置 → 昔涟 · 主题：人格底稿与三个开关）与背景管理器（外观三档 / 二选一 / 轮换 / 间隔 / 淡化 / 缩略图）：
 
 | 人格与主题 | 背景 |
 | --- | --- |
@@ -76,10 +77,11 @@ dsh plugin --profile desktop add github:berhbro/dsh-cyrene-theme
 3. 也可以在「设置 → 昔涟 · 主题」里打开同一份编辑器；标题右边那个小标签就是本包版本号（读的是安装目录 `package.json` 的 `version`，装了新版才会变）。
 4. 编辑框里写的就是人格底稿——**内置默认就是作者自己长期在用的那一版**（语气 / 边界 / 参考回答格式三段，嫌啰嗦可以直接删掉再用）；点「保存设定」后，之后每一轮对话都会以这段设定回答。三个开关分别是**昔涟人格**、**粉白毛玻璃主题**、**允许发表情包**（"重新载入"会把表情包清单重新拉一遍）。
 5. 下面一行「✦ 表情包管理」是唯一的入口，点「打开管理器」跳出一整页：**大小**滑杆拖动时先就地预览、松手才落盘；**添加**一行填「名字 / 什么时候贴」再选张图（png / jpg / gif / webp / avif，单张 ≤8MB）即可；自己加的那些卡片角上有「✕ 删除」，包内的那 11 张删不了（改 `stickers.json` 才是它们的入口）。
-6. 再下面一行「✦ 背景图管理」是背景的唯一入口，点「打开管理器」跳出一整页：最上面是**外观**两档「浅色 / 深色」——切的是整个应用的外观（走宿主自己的主题服务，偏好由宿主落盘），不是只换背景图；接着是「背景图 / 简约（无图）」二选一，选**简约**就回到没加背景图之前那种样子（渐变底 + 素着的对话列），管理器里剩下的控件跟着变灰；下面**上传**一张自己的图（png / jpg / gif / webp / avif，单张 ≤24MB，会落进 `backgrounds-custom/`）、**点缩略图**把它定为起点、自己传的那几张角上有「删除」、还有**自动轮换**（间隔 15–600 秒）与**淡化**（0.2–0.85，越大照片越淡、正文越清楚）、「下一张」只是当场翻页（不写状态文件）。随包的图丢进 `Background/`，加删图刷新页面即可认。
-7. 再下面一行「✦ 长期记忆」是记忆的唯一入口：点「打开管理器」跳出一整页——**启用**开关（关掉只是不再往系统提示词里注入，数据一条不删）、上面一个搜索框（在已经载入的条目里过滤，不发请求）、一行**手动加一条**（正文 + 可选标签，`记住`）、列表按时间倒序显示（正文 + 日期 + 标签 + `删除`），最下面「清空全部」会先确认一次。平时不用管它：模型觉得该记的会自己调 `cyrene_memory_add` 写进来，需要翻旧事时自己调 `cyrene_memory_search`。
-8. 再下面一行「✦ 世界书」是设定库的入口：点「打开管理器」跳出一整页——只有三件事。**从官方 wiki 抓取 / 更新**（拉一次接口、清一遍 HTML 与累积重复、按角色拆成条目，写进 `$DSH_HOME/cyrene-worldbook.json`，几秒到十几秒）；**打开文件位置**（交给系统文件管理器把那份 json 选中，浏览器做不到这件事，所以由宿主去叫窗口）；**清空**（删文件，人格与记忆一条不动）。抓到的条目不在面板里铺开，想看就按上面那条路径自己打开。模型需要设定时自己调 `cyrene_worldbook_search` 查。
-9. 「恢复默认」把默认底稿填回编辑框（还要点一次保存才生效），「重新载入」丢弃未保存的改动（表情包清单、背景清单、记忆与世界书一起重拉）。
+6. 再下面一行「✦ 背景图管理」是背景的唯一入口，点「打开管理器」跳出一整页：最上面是**外观**三档「浅色 / 深色 / 跟随系统」——切的是整个应用的外观（走宿主自己的主题服务，偏好由宿主落盘；「跟随系统」会跟着系统的深色开关自己走），不是只换背景图；接着是「背景图 / 简约（无图）」二选一，选**简约**就回到没加背景图之前那种样子（渐变底 + 素着的对话列），管理器里剩下的控件跟着变灰；下面**上传**一张自己的图（png / jpg / gif / webp / avif，单张 ≤24MB，会落进 `backgrounds-custom/`）、**点缩略图**把它定为起点、自己传的那几张角上有「删除」、还有**自动轮换**（间隔 15–600 秒）与**淡化**（0–1，越大照片越淡、正文越清楚；0% 是照片原样，100% 等于盖回渐变底）、「下一张」只是当场翻页（不写状态文件）。随包的图丢进 `Background/`，加删图刷新页面即可认。
+7. 再下面一行「✦ 欢迎页」管新会话那一行：点「打开设置」跳出一整页——最上面是「**接管欢迎页**」开关（关掉就回到 DSH 自己的鱼 + 「探索未至之境」，设置留着）；接着是和页面上一样的**预览**（同尺寸的形象 + 艺术字欢迎语）；**形象**候选就是表情包里的贴纸和背景图里的照片（点一张即换，角标写着「贴纸 / 照片」），也可以**上传**自己的图（png / jpg / gif / webp / avif，单张 ≤8MB，落进 `hero-custom/`）；下面一个文本框改**欢迎语**（不 trim，首尾空格原样保留），再下面一个改**文本自定义 CSS**——框里预填的就是当前默认样式，改哪行改哪行，旁边还有「填回默认样式」；打字时预览立刻跟着变，点「保存」才写进宿主。详见「新会话欢迎页 → 欢迎页管理器」。
+8. 再下面一行「✦ 长期记忆」是记忆的唯一入口：点「打开管理器」跳出一整页——**启用**开关（关掉只是不再往系统提示词里注入，数据一条不删）、上面一个搜索框（在已经载入的条目里过滤，不发请求）、一行**手动加一条**（正文 + 可选标签，`记住`）、列表按时间倒序显示（正文 + 日期 + 标签 + `删除`），最下面「清空全部」会先确认一次。平时不用管它：模型觉得该记的会自己调 `cyrene_memory_add` 写进来，需要翻旧事时自己调 `cyrene_memory_search`。
+9. 再下面一行「✦ 世界书」是设定库的入口：点「打开管理器」跳出一整页——只有三件事。**从官方 wiki 抓取 / 更新**（拉一次接口、清一遍 HTML 与累积重复、按角色拆成条目，写进 `$DSH_HOME/dsh-theme-cyrene/cyrene-worldbook.json`，几秒到十几秒）；**打开文件位置**（交给系统文件管理器把那份 json 选中，浏览器做不到这件事，所以由宿主去叫窗口）；**清空**（删文件，人格与记忆一条不动）。抓到的条目不在面板里铺开，想看就按上面那条路径自己打开。模型需要设定时自己调 `cyrene_worldbook_search` 查。
+10. 「恢复默认」把默认底稿填回编辑框（还要点一次保存才生效），「重新载入」丢弃未保存的改动（表情包清单、背景清单、记忆与世界书一起重拉）。
 
 ### 改完之后什么时候生效
 
@@ -91,7 +93,9 @@ dsh plugin --profile desktop add github:berhbro/dsh-cyrene-theme
 | `cordis.patch.yml` | 重载插件行或重启 DSH |
 | `hero.image` / 欢迎语（状态文件或 `DEFAULT_HERO`） | 重载插件行或重启 DSH（宿主半启动时读一次） |
 | `Background/` 里加图 / 删图 / 改名 | **刷新页面即可**——页面每次都会带 `reload=1` 让宿主重扫那个目录，不需要动宿主半 |
-| 面板里上传 / 删除背景图、切浅色 / 深色外观 | **立刻**——上传与删除走插件自己的路由，外观走宿主主题服务，都和点主题开关同一条路 |
+| 面板里上传 / 删除背景图、切浅色 / 深色 / 跟随系统 | **立刻**——上传与删除走插件自己的路由，外观走宿主主题服务，都和点主题开关同一条路 |
+| 面板里换欢迎页形象、改欢迎语 / 自定义 CSS | **立刻**——形象走 `POST /cyrene/hero`，文案与 CSS 走 `/cyrene/state`，保存后当前页面与之后的页面都认 |
+| 手工改状态文件里的 `hero.image` | 重载插件行或重启 DSH（路径只在启动时解析一次） |
 | 手工改状态文件里的 `background` | 重载插件行或重启 DSH |
 | 面板里加 / 删记忆、开关长期记忆 | **立刻**——走插件自己的 `/cyrene/memory` 路由，下一轮对话就带新记忆 |
 | 手工改 `cyrene-memory.json` | 重载插件行或重启 DSH |
@@ -103,10 +107,21 @@ dsh plugin --profile desktop add github:berhbro/dsh-cyrene-theme
 
 ## 状态文件
 
+所有运行时数据都收在 `$DSH_HOME/dsh-theme-cyrene/`（默认 `~/.dsh/dsh-theme-cyrene/`）这一个目录里，三个文件各管一件事：
+
+```
+~/.dsh/dsh-theme-cyrene/
+  cyrene-theme.json      主题与人格设定（下面这个对象）
+  cyrene-memory.json     长期记忆
+  cyrene-worldbook.json  世界书（设定库）
+```
+
+目录在需要时自动建。**从旧版本升上来的用户不用手工搬**：启动时 `ensureDataDir()` 会把还摊在 `~/.dsh` 根上的那三个文件**移**进这个目录——新位置没有就直接 `rename`（跨盘或被占用时退回读写复制）；两边都有就**谁新听谁的**，输的那份改名成同目录下的 `<文件名>.old`（不删数据，`~/.dsh` 根上也不留东西）。整个迁移是幂等的：再启动一次不会搬第二遍，也搬不动已经就位的数据。
+
 ```json
 { "persona": "……人格提示词……", "enabled": true, "theme": true, "stickers": true,
   "stickerSize": 96, "customStickers": [], "customBackgrounds": [],
-  "hero": { "image": "meme/俏皮眨眼.png", "title": "让昔涟来帮帮你吧🎵" },
+  "hero": { "image": "meme/俏皮眨眼.png", "title": "让昔涟来帮帮你吧🎵", "css": "", "enabled": true },
   "background": { "enabled": true, "current": "", "rotate": false, "interval": 90, "dim": 0.6 },
   "rev": 3 }
 ```
@@ -117,8 +132,8 @@ dsh plugin --profile desktop add github:berhbro/dsh-cyrene-theme
 - `stickers`：表情包开关（关掉后那段「【表情包】」说明不注入）。
 - `stickerSize`：聊天里贴图的最大边长（px），落盘前夹在 48–320 之间。它**不跟主题开关走**——贴图大小是插件设定，关掉主题也照样生效。
 - `customStickers`：面板里自添加的表情包（`{ id, file, label, when }`，`file` 只是 `stickers-custom/` 下的文件名，越界或类型不认识的一律丢弃）。
-- `hero`：新会话欢迎页的**形象路径**（相对插件目录，只认包内的图片）与**欢迎语**。形象读不出来（文件不在 / 类型不认识 / 超过 8MB）时 `GET /cyrene/state` 里的 `hero.ready` 是 `false`，页面就只显示欢迎语、不挂坏图；改完要重载插件行或重启 DSH 才认（宿主半只在启动时读一次磁盘）。
-- `background`：整页背景。`enabled` 是总开关（还要求主题开关也是开着的），`current` 是起点文件名（**空字符串＝按目录顺序的第一张**；填的名字不在清单里也不会出事，只是被当作没指定），`rotate` 是自动轮换，`interval` 是轮换间隔秒数（落盘前夹在 15–3600），`dim` 是色纱浓度（夹在 0.2–0.85，越大越淡）。非字符串、带 `/` `\` `..` 的 `current` 一律不写。
+- `hero`：新会话欢迎页的四样东西——**形象路径**（`image`，相对插件目录；贴纸、背景图、自己传的都行）、**欢迎语**（`title`，**不 trim**：首尾空格是你自己写的，原样保留）、**欢迎语的自定义 CSS**（`css`，原样收下、只去两端空白并封顶 4000 字）、**接管开关**（`enabled`，关掉就撤掉槽位注册，回到 DSH 自己的鱼 + 「探索未至之境」）。这四样都能在「设置 → ✦ 欢迎页」里改，不用手工编辑这个文件。形象读不出来（文件不在 / 类型不认识 / 超过 8MB）时 `GET /cyrene/state` 里的 `hero.ready` 是 `false`，页面就只显示欢迎语、不挂坏图；同一条快照里还有 `hero.stamp`（那张图的大小 + mtime 版本戳，客户端拼在 `?v=` 上，换图后 `<img>` 不会端缓存里的旧图）和 `defaultHero`（出厂值，「恢复默认」照它往回填）。改完要重载插件行或重启 DSH 才认（宿主半只在启动时读一次磁盘）。
+- `background`：整页背景。`enabled` 是总开关（还要求主题开关也是开着的），`current` 是起点文件名（**空字符串＝按目录顺序的第一张**；填的名字不在清单里也不会出事，只是被当作没指定），`rotate` 是自动轮换，`interval` 是轮换间隔秒数（落盘前夹在 15–3600），`dim` 是色纱浓度（夹在 0–1，越大越淡；0 是照片原样，1 等于盖回渐变底）。非字符串、带 `/` `\` `..` 的 `current` 一律不写。
 - `customBackgrounds`：面板里上传的背景图（`{ id, file, label }`，`file` 只是 `backgrounds-custom/` 下的文件名）。扫描目录时把这些图并进清单、`custom: true`，显示名用 `label`；删掉一条时同时清掉指向它的 `current`。
 - `rev`：写入版本号，每次成功写入 +1。手工编辑这个文件时把 `rev` 一起调大（或直接删掉这行）即可；留着小值会让还开着旧版本的页面写不进来（那正是它存在的意义）。
 
@@ -210,9 +225,9 @@ body[data-dsh-cyrene] img[alt^="昔涟·"]{max-width:var(--cyre-sticker-size);ma
 
 面板里的「背景图管理 → 打开管理器」可以上传自己的照片（png / jpg / gif / webp / avif，单张 ≤24MB）：图片转成 data URL 交给 `POST /cyrene/backgrounds`，宿主半写进 `backgrounds-custom/`（包内目录，这样字节路由才服务得到它；`.gitignore` 忽略，属运行时数据），再把 `{ id, file, label }` 记进状态文件的 `customBackgrounds`。扫描目录时这两处的图并成同一份清单：**同名以 `Background/` 为准**，自传的那几条带 `custom: true`、显示名用你起的名。删除只对自传的生效（`POST /cyrene/backgrounds/remove`，随包的那几张永远删不掉）；删掉的正好是起点时，这个引用会被一起清空，不留悬空 id。上限按 24MB 算，所以请求体上限放宽到 34MB（base64 会涨 ~37%）。
 
-### 浅色 / 深色外观
+### 浅色 / 深色 / 跟随系统
 
-管理器最上面是「浅色 / 深色」两档。点了走的是**宿主自己的主题服务**（`ctx.get('theme').setTheme('light' | 'dark')`，和点界面右上角那套主题开关同一条路），所以切的是整个应用、偏好也由宿主落盘——插件不自己记一份，避免两处状态打架。当前是哪一档从 `body` 上的 `data-ds-dark-theme` 读（宿主切深浅色都会先落这个标记），管理器里的高亮和「现在是深色 / 浅色模式」那行字跟着走。外壳没有暴露主题服务时退而直接增删同一个 `body` 属性，界面照常可用，只是偏好不会被记住。
+管理器最上面是「浅色 / 深色 / 跟随系统」三档。点了走的是**宿主自己的主题服务**（`ctx.get('theme').setTheme('light' | 'dark' | 'system')`，和点界面右上角那套主题开关同一条路），所以切的是整个应用、偏好也由宿主落盘——插件不自己记一份，避免两处状态打架。**偏好**从 `getTheme().preference` 读（所以「跟随系统」是独立一档，不会被误判成它解析出来的深浅），**解析结果**从 `body` 上的 `data-ds-dark-theme` 读；高亮落在偏好那一档，底下那行字会写「跟随系统（现在解析成深色 / 浅色）」。外壳没有暴露主题服务时退而直接增删同一个 `body` 属性（「跟随系统」按当前 `prefers-color-scheme` 落一次），界面照常可用，只是偏好不会被记住。
 
 **深浅色和背景图不绑定**：切外观不换图，选图也不动外观——外观归外观、背景归背景，各按各的喜好来。所以这里只放"切深浅色"这一个开关，不再有"给深色指定一张图"那种设定。
 
@@ -264,7 +279,19 @@ Error: single slot "conversation.hero.brand.mark" already has a registration at 
   [class*="_headline"]:has(.cyre-hero) [class*="_previewBadge"]{display:none}
   ```
 
-想换图：把新图丢进 `meme/`，改状态文件里的 `hero.image`（或让插件作者改 `DEFAULT_HERO`），然后重载插件行 / 重启 DSH。想换欢迎语：改 `hero.title`。
+想换图：最省事是「设置 → ✦ 欢迎页 → 打开设置」里点一张（贴纸 / 照片 / 自己传的都行），它写的就是 `hero.image`；也可以手工改状态文件或 `DEFAULT_HERO`，然后重载插件行 / 重启 DSH。想换欢迎语或给那段字加样式，同一页里改。
+
+### 欢迎页管理器（形象 / 欢迎语 / 文本自定义 CSS / 接管开关）
+
+设置页「✦ 欢迎页」那一行只是个入口，点「打开设置」弹出整页覆盖层（和表情包 / 背景图同一套壳：挂 `document.body`、Escape 或右上 ✕ 退出）。最上面是「**接管欢迎页**」开关，下面一条和页面上一样的预览（同一组 `.cyre-hero` 类、同样的粉白底），改字、改样式都先在预览里看得见。
+
+- **接管开关**（`hero.enabled`）：关掉就把 `conversation.hero.brand.mark` 的注册**撤掉**——`slots.inject()` 返回的 disposer 管的就是这一次注册，撤了之后宿主自己那条鱼 + 「探索未至之境」就回来了（single 槽只要还有注册，宿主就不会渲染兜底，所以只能撤、不能"渲染成空"）。重新打开会再注一次，不用重载插件行。设置本身留着，关着的时候管理器照样能改。
+- **形象**：候选直接取两份现成清单——`GET /cyrene/stickers`（透明底贴纸，卡片角标「贴纸」）和 `GET /cyrene/backgrounds`（照片，角标「照片」）。宿主半在清单里给每张**包内**图多带了一个 `path`（包内相对路径，`packagePath()` 算的；目录被改道到包外的自传项是 `null`），点卡片就是 `POST /cyrene/state { hero: { image: path } }`。自己传的走 `POST /cyrene/hero`（body `{ rev, data, name }`，`data` 是 data URL）：宿主写进 `hero-custom/hero.<ext>`——**同时只留一张**，换图就把旧的删掉——状态里只存 `hero-custom/hero.png` 这种**记号**，不写绝对路径；目录可以被 `CYRENE_HERO_CUSTOM_DIR` 改道（自检就这么做），寻址统一由 `resolveHeroFile()` 负责（带 `/` `\` `..` 的一律拒）。请求体上限仍是 12MB，解码后超 8MB 回 400 `too-large`，mime 不在 `png/jpg/jpeg/gif/webp/avif` 里回 400 `bad-type`。
+- **欢迎语**：一个文本框，存 `hero.title`；**不 trim**，首尾空格原样保留（音符后面跟空格也照样认得出来，那段空白还给文字）；留空就用兜底那句 `HERO_TITLE_FALLBACK`。末尾音符（`♪ ♫ 🎵 🎶`）仍会单独拆成 `span.cyre-hero-note` 轻轻晃。
+- **文本自定义 CSS**：文本框里**预填的就是当前默认样式**（`.cyre-hero-title-text` 里那套声明，和主样式表共用同一个常量 `HERO_TITLE_CSS_DEFAULT`），所以是"在现有样式上改哪行改哪行"，而不是从空白开始覆盖。存 `hero.css`（去两端空白、封顶 4000 字）：**只写声明**（`font-size:40px;`）会自动包成 `.cyre-hero-title-text{…}`，只作用在欢迎语那段字上；**含 `{ }`** 的当成整条规则原样追加（想动整行 / 形象 / 伪元素时用，作用域自负，这时窄屏那条 `@media` 权重更高，需要 `!important` 才盖得住）。它落在**另一张 `<style data-plugin-css="dsh-cyrene-theme-hero">`** 里、排在主题样式之后，所以同权重的声明天然能盖住默认那套粉白渐变。输入时先就地预览（直接改那张 `<style>`），点保存才写进宿主；**没保存就关掉会把预览还原**。存回来的内容和默认一模一样时按空串存（＝继续跟着插件默认走，不会被"冻"成一份快照），旁边还有「填回默认样式」一键还原文本框。
+- **恢复默认**：一次性把形象 / 欢迎语 / CSS / 接管开关四样写回 `defaultHero`（出厂值只存在宿主半，客户端不另存一份，所以改了 `DEFAULT_HERO` 之后界面也跟得上）。
+
+这一行**不跟主题开关走**（它是"昔涟在这儿"的标识，不是皮肤的一部分）。开关、文案与 CSS 走 `/cyrene/state`，保存即刻生效、刷新页面也不会丢；只有 `hero.image` 那条路径是宿主半在启动时读一次的，手工改状态文件后要重载插件行 / 重启 DSH。
 
 ### 输入框的默认占位提示
 
@@ -302,7 +329,7 @@ body[data-dsh-cyrene] [data-composer-input][data-placeholder^="Describe what you
 
 ### 存在哪、谁写
 
-- 数据在 `$DSH_HOME/cyrene-memory.json`：`{ enabled, rev, items: [{ id, text, tags, created, importance }] }`。**单独一个文件**是故意的——记忆会长到几十条，而设定文件必须保持小、能随手删掉重来。
+- 数据在 `$DSH_HOME/dsh-theme-cyrene/cyrene-memory.json`：`{ enabled, rev, items: [{ id, text, tags, created, importance }] }`。**单独一个文件**是故意的——记忆会长到几十条，而设定文件必须保持小、能随手删掉重来。
 - 写入口有三个，走的是同一条路（宿主的 `tools` 服务与 HTTP 路由都在改同一份内存态，再一起落盘）：
   1. 模型自己调 `cyrene_memory_add`（正文 + 可选标签）；
   2. 面板里手动加一条；
@@ -347,13 +374,13 @@ body[data-dsh-cyrene] [data-composer-input][data-placeholder^="Describe what you
 
 ### 存在哪、从哪来
 
-- 库本体：`$DSH_HOME/cyrene-worldbook.json`（默认 `~/.dsh/`），结构和上面「状态文件」里那段一样。删掉＝清空库。
+- 库本体：`$DSH_HOME/dsh-theme-cyrene/cyrene-worldbook.json`（默认 `~/.dsh/`），结构和上面「状态文件」里那段一样。删掉＝清空库。
 - 面板里「✦ 世界书 → 从官方 wiki 抓取 / 更新」走的是插件自己的 `POST /cyrene/worldbook`（`action: fetch`）：宿主半去拉 `https://act-api-takumi.mihoyo.com/event/rpgchrysosheirs/index?lang=zh-cn`，清 HTML、去累积重复、按角色拆条目，再写盘 + 重挂索引，一次请求做完。
 - **管理器里不铺数据**：那一页只有「有多大、什么时候抓的、文件在哪」加上三个动作（抓取 / 更新、打开文件位置、清空）。抓到的 279 条不会列出来——想看原文就点「打开文件位置」，宿主会调系统文件管理器把那份 json 选中（浏览器做不到这件事，所以是 `POST /cyrene/worldbook/reveal`）；也可以直接照路径自己用编辑器打开。
 - 也可以离线自己生成（同样的转换逻辑，纯 Node，无依赖）：
 
 ```bash
-node tools/build-worldbook.mjs --out ~/.dsh/cyrene-worldbook.json
+node tools/build-worldbook.mjs --out ~/.dsh/dsh-theme-cyrene/cyrene-worldbook.json
 node tools/build-worldbook.mjs --source ./wiki-index.json   # 用已经存下来的原始响应
 ```
 
@@ -438,12 +465,12 @@ node test/client.smoke.mjs
 node test/contrast.mjs
 ```
 
-`host.smoke.mjs` 152 项断言，全部跑在临时目录里（脚本自己把 `DSH_HOME` 指过去，不碰真实的 `~/.dsh`）：section 名与 order 回退、默认底稿、`/cyrene/state` 的信封与响应头、落盘与跨"重启"读回、重挂 section 的 disposer 语义、`enabled=false` 与空白 persona、404、超过 256KB 的请求体，**rev 乐观并发**（缺 rev 400、过期 rev 409 且不改状态、成功写入 rev+1、重启后旧 rev 依然被拒、`lastWrite` 诊断记录被拒的尝试），**取证旁路**（`POST /cyrene/report` 存内存、`GET` 读回、超 128KB 400 拒收且不覆盖上一份、全程不碰 `rev`/状态/磁盘），**表情包**（清单解析出 11 项且都能取到字节、`Content-Type` 与长度对得上、缓存与 `nosniff` 头、未知 id 404、`stickers:false` 之后系统提示词里不再有「【表情包】」并落盘、再打开回来），以及**欢迎页形象**（`/cyrene/state` 里的 `hero` 四项、`GET /cyrene/hero` 回真图字节、缓存/nosniff/`ETag`、带对 `ETag` 回 304、改欢迎语立即生效且落盘、`../` 越界与不存在的文件都只是 `ready:false` 而不是 500、改回默认后重新就绪），以及**表情包管理**（新装的状态文件带 `stickerSize: 96` 与空 `customStickers`；上传成功回 `{state, stickers}` 两个快照、清单里那一项 `custom: true` 且 `label`/`when` 原样保留、新图能从 `/cyrene/sticker/<id>` 读回同样长度的字节、条目落盘、人格 section 立刻含新名字与时机；上传同样受 rev 闸门管、非 data URL 400 `bad-image`、类型不认识 400 `bad-type`、解码后超 8MB 400 `too-large` 且磁盘不留东西；`stickerSize` 9999→320 / 10→48 / 128.4→128 并落盘；删除后清单为空、文件也没了、人格附录不再提它；删不存在的 id（含 `../../etc/passwd` 这种写法）404 `not-found`），以及**背景图**（`/cyrene/state` 里的 `background` 五项默认值、清单回 `{ error, folder: 'Background', items }` 且每项 `url` 正好是 `/cyrene/background/<encodeURIComponent(id)>`、字节路由的长度/类型/缓存/`nosniff` 头、未知名字与 `..%2F..%2Fpackage.json` 都只是 404、脏值补丁被夹住或原样保留（`dim 5→0.85`、`interval 3→15`、`enabled:'no'` 不动、`current:'../outside.jpeg'` 不动）、正常补丁确实落盘、改回默认），**背景管理器**（补丁里带老的 `darkImage` 键会被忽略、不写进状态；上传成功回 `{ state, backgrounds }` 两个快照、自传项 `custom: true` 且显示名用 `label`、随包那几张不算 custom、字节能从同一条路由读回、条目落盘；上传同样受 rev 闸门管、非 data URL 400 `bad-image`、类型不认识 400 `bad-type`；**随包那张删不掉**（404 `not-found`）；把自传那张设成起点与深色后再删，条目／清单／`current`／`darkImage` 一起收拾干净、文件也真的从磁盘删掉），以及**版本号**（`/cyrene/state` 快照里的 `version` 与安装目录 `package.json` 的 `version` 一致且非空），以及**长期记忆**（默认是空清单、加一条时正文折叠空白/标签按逗号顿号切开/
+`host.smoke.mjs` 183 项断言，全部跑在临时目录里（脚本自己把 `DSH_HOME` 指过去，不碰真实的 `~/.dsh`）：section 名与 order 回退、默认底稿、`/cyrene/state` 的信封与响应头、落盘与跨"重启"读回、重挂 section 的 disposer 语义、`enabled=false` 与空白 persona、404、超过 256KB 的请求体，**rev 乐观并发**（缺 rev 400、过期 rev 409 且不改状态、成功写入 rev+1、重启后旧 rev 依然被拒、`lastWrite` 诊断记录被拒的尝试），**取证旁路**（`POST /cyrene/report` 存内存、`GET` 读回、超 128KB 400 拒收且不覆盖上一份、全程不碰 `rev`/状态/磁盘），**表情包**（清单解析出 11 项且都能取到字节、`Content-Type` 与长度对得上、缓存与 `nosniff` 头、未知 id 404、`stickers:false` 之后系统提示词里不再有「【表情包】」并落盘、再打开回来），以及**欢迎页形象**（`/cyrene/state` 里的 `hero` 四项、`GET /cyrene/hero` 回真图字节、缓存/nosniff/`ETag`、带对 `ETag` 回 304、改欢迎语立即生效且落盘、`../` 越界与不存在的文件都只是 `ready:false` 而不是 500、改回默认后重新就绪），以及**表情包管理**（新装的状态文件带 `stickerSize: 96` 与空 `customStickers`；上传成功回 `{state, stickers}` 两个快照、清单里那一项 `custom: true` 且 `label`/`when` 原样保留、新图能从 `/cyrene/sticker/<id>` 读回同样长度的字节、条目落盘、人格 section 立刻含新名字与时机；上传同样受 rev 闸门管、非 data URL 400 `bad-image`、类型不认识 400 `bad-type`、解码后超 8MB 400 `too-large` 且磁盘不留东西；`stickerSize` 9999→320 / 10→48 / 128.4→128 并落盘；删除后清单为空、文件也没了、人格附录不再提它；删不存在的 id（含 `../../etc/passwd` 这种写法）404 `not-found`），以及**背景图**（`/cyrene/state` 里的 `background` 五项默认值、清单回 `{ error, folder: 'Background', items }` 且每项 `url` 正好是 `/cyrene/background/<encodeURIComponent(id)>`、字节路由的长度/类型/缓存/`nosniff` 头、未知名字与 `..%2F..%2Fpackage.json` 都只是 404、脏值补丁被夹住或原样保留（`dim 5→0.85`、`interval 3→15`、`enabled:'no'` 不动、`current:'../outside.jpeg'` 不动）、正常补丁确实落盘、改回默认），**背景管理器**（补丁里带老的 `darkImage` 键会被忽略、不写进状态；上传成功回 `{ state, backgrounds }` 两个快照、自传项 `custom: true` 且显示名用 `label`、随包那几张不算 custom、字节能从同一条路由读回、条目落盘；上传同样受 rev 闸门管、非 data URL 400 `bad-image`、类型不认识 400 `bad-type`；**随包那张删不掉**（404 `not-found`）；把自传那张设成起点与深色后再删，条目／清单／`current`／`darkImage` 一起收拾干净、文件也真的从磁盘删掉），以及**版本号**（`/cyrene/state` 快照里的 `version` 与安装目录 `package.json` 的 `version` 一致且非空），以及**长期记忆**（默认是空清单、加一条时正文折叠空白/标签按逗号顿号切开/
 ev 自增、记忆写在自己的文件里且不含 persona、缺 
 ev → 400、过期 
-ev → 409、空正文 → 400、关掉只是不再注入而不删数据、再打开数据还在、未知动作 → 400、删不存在的 id → 404、删完 count 归零），以及**世界书**（索引回条数 / 版本 / 按角色汇总且**不带正文**、有库时挂上 `cyrene:worldbook` 且 order = 人格 + 10、排在记忆之前、未知动作 400 `bad-action`、原文视图 `text/plain` + `no-store` 且能解析、清空后条目归零且文件真删、清空后那行 section 也卸掉、主题 section 不受影响、换一份库再「重新载入」跟着换版本号）。
+ev → 409、空正文 → 400、关掉只是不再注入而不删数据、再打开数据还在、未知动作 → 400、删不存在的 id → 404、删完 count 归零），以及**世界书**（索引回条数 / 版本 / 按角色汇总且**不带正文**、有库时挂上 `cyrene:worldbook` 且 order = 人格 + 10、排在记忆之前、未知动作 400 `bad-action`、原文视图 `text/plain` + `no-store` 且能解析、清空后条目归零且文件真删、清空后那行 section 也卸掉、主题 section 不受影响、换一份库再「重新载入」跟着换版本号），以及**欢迎页管理**（`hero.css` 原样收下只去两端空白并封顶 4000 字、落盘、`defaultHero` 在快照里、上传自己的形象落成 `hero-custom/hero.png` 且 `ready/stamp` 都有、再传一张目录里仍然只有一份、类型不认识与不是 data URL 各自 400、`hero-custom/../package.json` 只是 `ready:false`、清单里的包内图都带 `path`），以及**数据目录迁移**（老位置那三个 json 在启动时被**搬**进 `dsh-theme-cyrene/`：`statePath` 指向新位置、人格与 `rev` 跟着过来、记忆与世界书也在新位置、`.dsh` 根上不再留文件、目录里恰好三份、再启动一次不会搬第二遍；两边都有时谁新用谁——根上更新就搬过去顶掉，目录里更新就把根上那份改名成 `<文件名>.old` 收进目录，`.dsh` 根上两种情况下都不留东西）。
 
-`client.smoke.mjs` 178 项断言，用最小 DOM / react / fetch 桩在 node 里把客户端 bundle 跑一遍：loader 注册与导出、6 个 effect、样式表注入与带 `data-plugin-css`、body 作用域与卸载还原、三个槽位的 name（含欢迎页单占位槽不带 id/order、注册带 `priority: -1`、**宿主已占位时注册失败不外溢、另外两个槽位照常注册**）、按宿主状态打 `data-cyrene-skin`、宿主不可达时仍能装上；**回归项：毛玻璃不落在整帧 overlay 层本身上、不落在右侧栏容器 `[data-sidebar-right-panel]` 上、只落在浮层的直接子元素与真正的窗格 `[data-dockkit-pane]`/`[data-dockkit-float]` 上、html 画布有不透明兜底**；**取证扫描的挑选逻辑**、**取证通道的自我修复**（宿主半还没有这条路由时开机照样上报、被 404 拒收后下一拍重试、内容没变就不重复上报）、**表情包管理器**（编辑器里只剩一行入口：一句「N 张」概况 + 「打开管理器」按钮，内嵌网格/滑杆/诊断复选框都不在了；点入口弹出覆盖层再按清单渲染卡片、`img.src` 指向宿主半的字节路由而不是 `file://`、点「关闭」后覆盖层真的从 `body` 上摘掉、表情包开关默认按宿主值、关掉只发自己那个字段）；**对话界面微调**（欢迎页的头像与艺术字规则、**头像是一整张贴纸：不画边框/底盘/圆角/遮罩、直接用素材自己的 alpha**、**整行纯装饰：`pointer-events:none` + `user-select:none` + `cursor:default`，`img` 另带 `-webkit-user-drag:none` 与 `draggable:false`**、藏掉内置文案的两种落点与官方「预览版」徽标、`:has()` 收成单列、艺术字的字栈以方正舒体打头且**收在无衬线**（同时断言样式表里不会出现行楷/楷体/`serif`）、粉 → 白渐变的确切色标与粉边、`prefers-reduced-motion`、占位提示的 `color:transparent` + `::after` 文案、**`::after` 必须 `position:absolute;left:0` 钉在容器左上角**且明写无衬线字栈、闸门只认"默认/欢迎页默认"两个前缀且没有无闸门的写法、状态类提示没被写进规则、以及欢迎页组件首帧真的渲染出指向 `/cyrene/hero` 的 `img`、音符合 `🎵` 被拆成单独 span、宿主说 `ready:false` 时不挂坏图、设置页标题旁的版本号标签取自宿主快照）；以及**长期记忆**（设置页入口只剩一行、空状态有说明、点入口弹出覆盖层、记住 的 POST 带记忆自己的 `rev` 与 `action:add`、卡片渲染出正文与日期/标签、概况行跟着刷新、搜索只在本地过滤不发请求、搜不到给一句提示、删除带 `action:remove` 与 id、关掉发 `action:toggle` 且概况写「已关闭」、点 ✕ 把覆盖层从 `body` 上摘掉）；并且**真的把设置页组件跑起来**驱动编辑器——开关改动只发自己那个字段（不再回写缓存快照）、保存按钮只提交改过的 persona、每次写入都带上宿主的 rev、收到 409 后自动重新载入并按宿主的值回正开关；**表情包管理器页**——诊断复选框已经从编辑器里取消（也不在管理器里）；大小滑杆按宿主值回显、拖动（`input`）只改 CSS 变量不落盘、松手（`change`）才 `save` 且**只发 `stickerSize` 这一个字段**；没选文件时「添加」禁用、选文件后可点、上传 POST 带 `rev`/`name`/`label`/`when`/`data`（data 以 `data:image/png;base64,` 开头）、上传成功后网格多一张且只有自添加的那张带「删除」按钮与 `data-id`、点删除走 `/cyrene/stickers/remove` 并带上 id 与 rev、删完编辑器入口那句概况也跟着回到「2 张」；以及**回归：卡片自己身上不许有 `backdrop-filter`（只能画在 `::before` 上）、毛玻璃组齐全且已经不再挂诊断闸门、`--cyre-sticker-size` 与 `img[alt^="昔涟·"]` 两条贴图大小规则、管理器不会让素材超出页面范围（外层封顶 + 内层滚动 + 卡片锁宽）**；以及**背景图**——`.cyre-bg` 层里铺好两层交叉淡入的图与一层色纱、并且是 `position:fixed` + `z-index:-1` + `pointer-events:none`（不占布局、不接指针）、对话列纸面确实有圆角与底色、**回归：`[data-conversation-scroll]` 上不许出现 `backdrop-filter`**；清单请求带 `reload=1`、`--cyre-bg-dim` 与 `data-cyre-bg` 跟着宿主状态走、缩略图 2 张且 `src` 指向字节路由而不是 `file:`、起点那张带 `data-on="1"` 且真的铺在图层上、概况行显示张数；关开关**只发 `{ background: { enabled: false } }` 这一个键**、点缩略图发 `{ background: { current } }` 且高亮与图层一起换、**「下一张」和自动轮换都不写宿主**（这段里没有任何 POST 体含 `"current"`）、浓度拖动只改 CSS 变量与标签、松手才落盘**；以及**背景管理器**（编辑器里只剩「打开管理器」那一行，网格 / 滑杆 / 「下一张」都不在设置页了；点入口弹出挂在 `body` 上的覆盖层、管理器按清单渲染卡片、缩略图**照用宿主给的 `url`**（`?v=2` 的查询串原样保留）、自传那张才有「删除」按钮、每张卡片上的「深色」绑图按钮已经取消（只剩缩略图）；管理器顶部的「浅色 / 深色」两档调的是宿主的 `setTheme('dark')` / `setTheme('light')` 且**一个字节的插件状态都不写**、高亮与「现在是哪种外观」那行跟着换；**切到深色不换背景**（重铺时用的还是用户选的那张起点）；上传 POST 到 `/cyrene/backgrounds` 且带 `rev`/`name`/`label`/`data`、删除 POST 到 `/cyrene/backgrounds/remove` 且带 id 与 rev；窄屏媒体查询真的收住了欢迎页：缩字号 / 允许换行 / 浮层宽度）**；以及**世界书**（设置页只有一行入口 + 一句「N 条（vX）」概况、点开是覆盖层、元信息行写版本 / 条数 / 角色数 / 抓取日期与文件路径、**抓到的条目不铺在面板里：列表、搜索框、原文预览都不在了**、抓取发 `action:fetch` 且元信息与概况一起更新、**「打开文件位置」发 `POST /cyrene/worldbook/reveal`（交给宿主叫系统文件管理器，不做成外链）**、清空发 `action:clear` 并回到空状态、点 ✕ 把覆盖层摘掉）**。
+`client.smoke.mjs` 208 项断言，用最小 DOM / react / fetch 桩在 node 里把客户端 bundle 跑一遍：loader 注册与导出、8 个 effect、样式表注入与带 `data-plugin-css`、body 作用域与卸载还原、三个槽位的 name（含欢迎页单占位槽不带 id/order、注册带 `priority: -1`、**宿主已占位时注册失败不外溢、另外两个槽位照常注册**）、按宿主状态打 `data-cyrene-skin`、宿主不可达时仍能装上；**回归项：毛玻璃不落在整帧 overlay 层本身上、不落在右侧栏容器 `[data-sidebar-right-panel]` 上、只落在浮层的直接子元素与真正的窗格 `[data-dockkit-pane]`/`[data-dockkit-float]` 上、html 画布有不透明兜底**；**取证扫描的挑选逻辑**、**取证通道的自我修复**（宿主半还没有这条路由时开机照样上报、被 404 拒收后下一拍重试、内容没变就不重复上报）、**表情包管理器**（编辑器里只剩一行入口：一句「N 张」概况 + 「打开管理器」按钮，内嵌网格/滑杆/诊断复选框都不在了；点入口弹出覆盖层再按清单渲染卡片、`img.src` 指向宿主半的字节路由而不是 `file://`、点「关闭」后覆盖层真的从 `body` 上摘掉、表情包开关默认按宿主值、关掉只发自己那个字段）；**对话界面微调**（欢迎页的头像与艺术字规则、**头像是一整张贴纸：不画边框/底盘/圆角/遮罩、直接用素材自己的 alpha**、**整行纯装饰：`pointer-events:none` + `user-select:none` + `cursor:default`，`img` 另带 `-webkit-user-drag:none` 与 `draggable:false`**、藏掉内置文案的两种落点与官方「预览版」徽标、`:has()` 收成单列、艺术字的字栈以方正舒体打头且**收在无衬线**（同时断言样式表里不会出现行楷/楷体/`serif`）、粉 → 白渐变的确切色标与粉边、`prefers-reduced-motion`、占位提示的 `color:transparent` + `::after` 文案、**`::after` 必须 `position:absolute;left:0` 钉在容器左上角**且明写无衬线字栈、闸门只认"默认/欢迎页默认"两个前缀且没有无闸门的写法、状态类提示没被写进规则、以及欢迎页组件首帧真的渲染出指向 `/cyrene/hero` 的 `img`、音符合 `🎵` 被拆成单独 span、宿主说 `ready:false` 时不挂坏图、设置页标题旁的版本号标签取自宿主快照）；以及**长期记忆**（设置页入口只剩一行、空状态有说明、点入口弹出覆盖层、记住 的 POST 带记忆自己的 `rev` 与 `action:add`、卡片渲染出正文与日期/标签、概况行跟着刷新、搜索只在本地过滤不发请求、搜不到给一句提示、删除带 `action:remove` 与 id、关掉发 `action:toggle` 且概况写「已关闭」、点 ✕ 把覆盖层从 `body` 上摘掉）；并且**真的把设置页组件跑起来**驱动编辑器——开关改动只发自己那个字段（不再回写缓存快照）、保存按钮只提交改过的 persona、每次写入都带上宿主的 rev、收到 409 后自动重新载入并按宿主的值回正开关；**表情包管理器页**——诊断复选框已经从编辑器里取消（也不在管理器里）；大小滑杆按宿主值回显、拖动（`input`）只改 CSS 变量不落盘、松手（`change`）才 `save` 且**只发 `stickerSize` 这一个字段**；没选文件时「添加」禁用、选文件后可点、上传 POST 带 `rev`/`name`/`label`/`when`/`data`（data 以 `data:image/png;base64,` 开头）、上传成功后网格多一张且只有自添加的那张带「删除」按钮与 `data-id`、点删除走 `/cyrene/stickers/remove` 并带上 id 与 rev、删完编辑器入口那句概况也跟着回到「2 张」；以及**回归：卡片自己身上不许有 `backdrop-filter`（只能画在 `::before` 上）、毛玻璃组齐全且已经不再挂诊断闸门、`--cyre-sticker-size` 与 `img[alt^="昔涟·"]` 两条贴图大小规则、管理器不会让素材超出页面范围（外层封顶 + 内层滚动 + 卡片锁宽）**；以及**背景图**——`.cyre-bg` 层里铺好两层交叉淡入的图与一层色纱、并且是 `position:fixed` + `z-index:-1` + `pointer-events:none`（不占布局、不接指针）、对话列纸面确实有圆角与底色、**回归：`[data-conversation-scroll]` 上不许出现 `backdrop-filter`**；清单请求带 `reload=1`、`--cyre-bg-dim` 与 `data-cyre-bg` 跟着宿主状态走、缩略图 2 张且 `src` 指向字节路由而不是 `file:`、起点那张带 `data-on="1"` 且真的铺在图层上、概况行显示张数；关开关**只发 `{ background: { enabled: false } }` 这一个键**、点缩略图发 `{ background: { current } }` 且高亮与图层一起换、**「下一张」和自动轮换都不写宿主**（这段里没有任何 POST 体含 `"current"`）、浓度拖动只改 CSS 变量与标签、松手才落盘**；以及**背景管理器**（编辑器里只剩「打开管理器」那一行，网格 / 滑杆 / 「下一张」都不在设置页了；点入口弹出挂在 `body` 上的覆盖层、管理器按清单渲染卡片、缩略图**照用宿主给的 `url`**（`?v=2` 的查询串原样保留）、自传那张才有「删除」按钮、每张卡片上的「深色」绑图按钮已经取消（只剩缩略图）；管理器顶部的「浅色 / 深色」两档调的是宿主的 `setTheme('dark')` / `setTheme('light')` 且**一个字节的插件状态都不写**、高亮与「现在是哪种外观」那行跟着换；**切到深色不换背景**（重铺时用的还是用户选的那张起点）；上传 POST 到 `/cyrene/backgrounds` 且带 `rev`/`name`/`label`/`data`、删除 POST 到 `/cyrene/backgrounds/remove` 且带 id 与 rev；窄屏媒体查询真的收住了欢迎页：缩字号 / 允许换行 / 浮层宽度）**；以及**世界书**（设置页只有一行入口 + 一句「N 条（vX）」概况、点开是覆盖层、元信息行写版本 / 条数 / 角色数 / 抓取日期与文件路径、**抓到的条目不铺在面板里：列表、搜索框、原文预览都不在了**、抓取发 `action:fetch` 且元信息与概况一起更新、**「打开文件位置」发 `POST /cyrene/worldbook/reveal`（交给宿主叫系统文件管理器，不做成外链）**、清空发 `action:clear` 并回到空状态、点 ✕ 把覆盖层摘掉）**；以及**欢迎页管理**——设置页在「背景图管理」下面多一行入口、概况写着「欢迎语 + 形象文件名」（有自定义样式时再加一句）、点开是覆盖层且 aria-label 对得上、候选 = 贴纸 + 照片（各带 `path` 与「贴纸 / 照片」角标）、当前形象那张亮着、预览图地址带 `?v=<stamp>`；点卡片**只发 `hero.image` 一个键**、高亮跟着走；文本 CSS 只写声明时自动包成 `.cyre-hero-title-text{…}`、含 `{ }` 时原样追加、输入即就地预览；**没保存就关掉会把预览还原**；保存把文案与 CSS 一起发（两端空白去掉）且只带 `hero` 一组；上传走 `POST /cyrene/hero` 并带 `rev` + data URL，回来路径换成自定义记号、预览地址带上新版本戳；「恢复默认」一次写回三样、默认值来自宿主的 `defaultHero`。
 
 `contrast.mjs` 34 项断言，从 `lib/client.js` 里抠出本包写下的 `--dsw-alias-*` token，把半透明面板 alpha 合成到渐变背景上（取粉最浓、层最透的最不利一角），算 WCAG 对比度：正文 10.7:1（浅）/12.1:1（深），次级与说明文字 ≥4.5:1，语义状态色 ≥3:1（error / warn-label ≥4.5:1），自绘主按钮上的字 ≥4.5:1，**浮空的 tooltip / toast 文字两种模式各算一遍**（宿主把气泡字色硬绑在 `--dsw-static-neutral-bluish-00` 上，深色主题要是只把这个 token 调暗就会深底深字——现在深色 15.6:1）。**为了过这些线，浅色主题的 brand 填充、caption/tertiary/deep-diving、state-\* 都比纯"糖果粉"深了一档**——粉色仍然在，只是不再是白字压浅粉那种读不清的搭配。
 
@@ -463,14 +490,15 @@ ev → 409、空正文 → 400、关掉只是不再注入而不删数据、再�
 dsh-cyrene-theme/
   package.json          dsh.bundle.patch + dsh.client（platform: web）
   cordis.patch.yml      插件树插入声明
-  lib/index.js          宿主半（ESM）：系统提示词 section（人格 + 世界书索引 + 记忆 + 表情包）+ /cyrene/state 路由 + 落盘 + 表情包清单/字节路由 + 表情包上传/删除 + /cyrene/hero + 背景清单/字节路由 + 背景上传/删除 + 长期记忆存储 / 路由 / 三个工具 + 世界书存储 / 路由 / 检索工具
-  lib/client.js         客户端半（手写 CJS bundle，无需构建）：样式表 + body 作用域 + 三个槽位 + 界面微调 + 整页背景层与对话内容的可读处理 + 设置面板 + 独立的表情包管理器页 / 背景管理器页 / 长期记忆页 / 世界书页
+  lib/index.js          宿主半（ESM）：系统提示词 section（人格 + 世界书索引 + 记忆 + 表情包）+ /cyrene/state 路由 + 落盘 + 表情包清单/字节路由 + 表情包上传/删除 + /cyrene/hero（读与上传）+ 背景清单/字节路由 + 背景上传/删除 + 长期记忆存储 / 路由 / 三个工具 + 世界书存储 / 路由 / 检索工具 + 数据目录与老文件迁移
+  lib/client.js         客户端半（手写 CJS bundle，无需构建）：样式表 + body 作用域 + 三个槽位 + 界面微调 + 整页背景层与对话内容的可读处理 + 设置面板 + 独立的表情包管理器页 / 背景管理器页 / 欢迎页设置页 / 长期记忆页 / 世界书页
   Background/           整页背景图素材（自带 the-longest-night.jpeg 浅色 / night-reading.jpeg 深蓝夜景；宿主启动时扫一次，页面每次带 reload=1 强制重扫）
   backgrounds-custom/   面板里上传的背景图（运行时数据，已 gitignore；不在仓库里）
   stickers.json         表情包清单（id / 名称 / 时机 / 文件），换图只改这里
   meme/                 表情包素材（11 张，jpeg/png，文件名＝表情名字）
   stickers-custom/      面板里自添加的表情包（运行时数据，已 gitignore；不在仓库里）
-  （运行时文件）       /cyrene-theme.json 是设定、/cyrene-memory.json 是长期记忆、/cyrene-worldbook.json 是世界书，都不在仓库里
+  hero-custom/          面板里上传的欢迎页形象（运行时数据，已 gitignore；不在仓库里）
+  （运行时文件）       `~/.dsh/dsh-theme-cyrene/` 下：cyrene-theme.json 是设定、cyrene-memory.json 是长期记忆、cyrene-worldbook.json 是世界书，都不在仓库里
   LICENSE               MIT
   screenshots.json      给插件市场看的截图清单（在 package.json 旁边，市场读它；不进 npm 包）
   docs/screenshots/     市场截图 4 张（DarkTheme / LightTheme / PersonalityManager / BackgroundPanel；只在仓库里，不进 npm 包）

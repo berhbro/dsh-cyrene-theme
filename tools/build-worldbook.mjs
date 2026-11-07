@@ -2,7 +2,7 @@
 /**
  * 把官方 wiki 抓下来、转成世界书 JSON。
  *
- *   node tools/build-worldbook.mjs                     # 抓线上、写到 ~/.dsh/cyrene-worldbook.json
+ *   node tools/build-worldbook.mjs                     # 抓线上、写到 ~/.dsh/dsh-theme-cyrene/cyrene-worldbook.json
  *   node tools/build-worldbook.mjs --source ./wiki.json # 用本地已经存好的原始 JSON
  *   node tools/build-worldbook.mjs --out ./wb.json     # 换个落盘位置
  *
@@ -27,7 +27,7 @@ function argOf(name, fallback) {
 
 const source = argOf('source', '');
 const lang = argOf('lang', 'zh-cn');
-const out = resolve(argOf('out', join(homedir(), '.dsh', 'cyrene-worldbook.json')));
+const out = resolve(argOf('out', join(homedir(), '.dsh', 'dsh-theme-cyrene', 'cyrene-worldbook.json')));
 
 async function loadRaw() {
   if (source === '') {

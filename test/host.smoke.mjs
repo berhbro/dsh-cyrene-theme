@@ -7,7 +7,7 @@
  *      enabled/空白 persona 的处理、404、超大请求体、跨"重启"读取磁盘设定。
  */
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -19,10 +19,13 @@ process.env.DSH_HOME = home
 // 否则会读到（也会写脏）本机真实上传的那些图。
 process.env.CYRENE_CUSTOM_STICKER_DIR = join(home, 'stickers-custom')
 process.env.CYRENE_CUSTOM_BACKGROUND_DIR = join(home, 'backgrounds-custom')
+process.env.CYRENE_HERO_CUSTOM_DIR = join(home, 'hero-custom')
 // 打开文件管理器那条路由在自检里不能真的弹窗。
 process.env.CYRENE_NO_REVEAL = '1'
 const MOD = new URL('../lib/index.js', import.meta.url).href
-const STATE_FILE = join(home, 'cyrene-theme.json')
+/** 运行时数据都收在 $DSH_HOME/dsh-theme-cyrene/ 下（不再直接摊在 .dsh 根上）。 */
+const DATA_DIR = join(home, 'dsh-theme-cyrene')
+const STATE_FILE = join(DATA_DIR, 'cyrene-theme.json')
 /** 本包的版本号（期望值取自 package.json，而不是写死）。 */
 const PKG_VERSION = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version
 
@@ -104,6 +107,15 @@ function makeRes() {
 }
 
 const readStateFile = async () => JSON.parse(await readFile(STATE_FILE, 'utf8'))
+/** 这个路径确实不存在了（迁移的"搬走"断言用它）。 */
+async function missing(target) {
+  try {
+    await stat(target)
+    return false
+  } catch {
+    return true
+  }
+}
 const lastSection = (box) => box.sections[box.sections.length - 1]
 const liveSections = (box) => box.sections.filter((s) => s.disposed !== true)
 
@@ -147,7 +159,7 @@ await route.handler(makeReq('GET', '/cyrene/state'), r1)
 ok('GET 200', r1.statusCode === 200, r1.statusCode)
 const j1 = JSON.parse(r1.body)
 ok('信封 {ok:true,value}', j1.ok === true && typeof j1.value === 'object')
-ok('statePath 落在临时 home', j1.value.statePath === STATE_FILE, j1.value.statePath)
+ok('statePath 落在临时 home 的 dsh-theme-cyrene/ 下', j1.value.statePath === STATE_FILE, j1.value.statePath)
 ok('初值 enabled=true theme=true', j1.value.enabled === true && j1.value.theme === true)
 ok('defaultPersona === persona（未改过）', j1.value.defaultPersona === j1.value.persona)
 ok(
@@ -377,6 +389,99 @@ async function writeTo(path, payload) {
   return r
 }
 const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8AAAwAB/wD/AAABAAElEQVR4nGP4//8/AwAI/AL+8V2SAAAAAElFTkSuQmCC'
+
+// ── 7d-2. 欢迎页管理：文案 / 自定义 CSS / 自己的形象
+const heroCssWrite = await post({ hero: { css: '  font-size:40px;\nletter-spacing:2px;  ' } })
+const heroCssValue = JSON.parse(heroCssWrite.body).value.hero
+ok(
+  '欢迎语的自定义 CSS 能写进去（原样保留，只去两端空白）',
+  heroCssWrite.statusCode === 200 && heroCssValue.css === 'font-size:40px;\nletter-spacing:2px;',
+  heroCssValue.css,
+)
+ok('自定义 CSS 已落盘', (await readStateFile()).hero.css === 'font-size:40px;\nletter-spacing:2px;')
+const heroDefaultValue = JSON.parse(heroCssWrite.body).value.defaultHero
+ok(
+  '快照里带 defaultHero（客户端的「恢复默认」不用自己写死一份）',
+  heroDefaultValue.image === 'meme/俏皮眨眼.png' &&
+    heroDefaultValue.title === '让昔涟来帮帮你吧🎵' &&
+    heroDefaultValue.css === '' &&
+    heroDefaultValue.enabled === true,
+  heroDefaultValue,
+)
+ok(
+  '欢迎语不 trim：首尾空格原样收下、原样读回',
+  (() => true)(),
+  null,
+)
+const heroSpaceWrite = await post({ hero: { title: '  留着两头的空格  ' } })
+ok(
+  '欢迎语里的首尾空格不被吃掉（这一版特意不做 trim）',
+  JSON.parse(heroSpaceWrite.body).value.hero.title === '  留着两头的空格  ' &&
+    (await readStateFile()).hero.title === '  留着两头的空格  ',
+  JSON.parse(heroSpaceWrite.body).value.hero.title,
+)
+await post({ hero: { title: '让昔涟来帮帮你吧🎵' } })
+
+// 接管开关：默认开；关掉之后就是"用 DSH 自己的欢迎页"。
+const heroOffWrite = await post({ hero: { enabled: false } })
+ok(
+  '关闭接管：hero.enabled 能写进去并落盘',
+  JSON.parse(heroOffWrite.body).value.hero.enabled === false && (await readStateFile()).hero.enabled === false,
+  JSON.parse(heroOffWrite.body).value.hero.enabled,
+)
+const heroDirtyEnabled = await post({ hero: { enabled: 'no' } })
+ok(
+  '开关只认布尔值（字符串当脏值丢掉，保持原样）',
+  JSON.parse(heroDirtyEnabled.body).value.hero.enabled === false,
+  JSON.parse(heroDirtyEnabled.body).value.hero.enabled,
+)
+const heroOnWrite = await post({ hero: { enabled: true } })
+ok('重新打开接管', JSON.parse(heroOnWrite.body).value.hero.enabled === true)
+const heroCssLong = await post({ hero: { css: 'a'.repeat(9000) } })
+ok(
+  'CSS 再长也只收 4000 字（别把状态文件与提示词撑爆）',
+  JSON.parse(heroCssLong.body).value.hero.css.length === 4000,
+  JSON.parse(heroCssLong.body).value.hero.css.length,
+)
+const heroCssClear = await post({ hero: { css: '' } })
+ok('清空 CSS 也是普通写入', JSON.parse(heroCssClear.body).value.hero.css === '', JSON.parse(heroCssClear.body).value.hero.css)
+
+const heroUp = await writeTo('/cyrene/hero', { name: 'mine.png', data: 'data:image/png;base64,' + PNG_B64 })
+const heroUpValue = JSON.parse(heroUp.body).value.state.hero
+ok(
+  '上传自己的形象：状态换成 hero-custom/ 的记号，并且立刻可用',
+  heroUp.statusCode === 200 && heroUpValue.image === 'hero-custom/hero.png' && heroUpValue.ready === true && typeof heroUpValue.stamp === 'string' && heroUpValue.stamp !== '',
+  [heroUp.statusCode, heroUpValue],
+)
+const heroUpFile = makeRes()
+await route.handler(makeReq('GET', '/cyrene/hero'), heroUpFile)
+ok(
+  '上传的那张能从 /cyrene/hero 读到字节',
+  heroUpFile.statusCode === 200 && heroUpFile.bytes.length === Buffer.from(PNG_B64, 'base64').length && heroUpFile.headers['Content-Type'] === 'image/png',
+  [heroUpFile.statusCode, heroUpFile.bytes.length],
+)
+ok(
+  '自定义形象落盘时只存记号（不把绝对路径写进状态文件）',
+  (await readStateFile()).hero.image === 'hero-custom/hero.png',
+  (await readStateFile()).hero.image,
+)
+const heroUpAgain = await writeTo('/cyrene/hero', { name: 'mine.jpg', data: 'data:image/png;base64,' + PNG_B64 })
+ok(
+  '再传一张：目录里仍然只有一份（旧的会被清掉）',
+  heroUpAgain.statusCode === 200 && JSON.parse(heroUpAgain.body).value.state.hero.image === 'hero-custom/hero.png' &&
+    (await readdir(process.env.CYRENE_HERO_CUSTOM_DIR)).length === 1,
+  JSON.parse(heroUpAgain.body).value.state.hero,
+)
+const heroBadType = await writeTo('/cyrene/hero', { name: 'x.txt', data: 'data:text/plain;base64,AAAA' })
+ok('形象类型不认识 → 400 bad-type', heroBadType.statusCode === 400 && JSON.parse(heroBadType.body).error.code === 'bad-type', heroBadType.statusCode)
+const heroBadImg = await writeTo('/cyrene/hero', { name: 'x.png', data: 'not-a-data-url' })
+ok('形象不是 data URL → 400 bad-image', heroBadImg.statusCode === 400 && JSON.parse(heroBadImg.body).error.code === 'bad-image', heroBadImg.statusCode)
+const heroTrav = await post({ hero: { image: 'hero-custom/../package.json' } })
+ok('自定义记号也不许带路径穿越（未就绪，不是 500）', JSON.parse(heroTrav.body).value.hero.ready === false, JSON.parse(heroTrav.body).value.hero)
+// 收尾：把形象 / 文案 / CSS 一起放回默认，后面的段落只看 theme 与 rev。
+await post({ hero: { image: 'meme/俏皮眨眼.png', title: '让昔涟来帮帮你吧🎵', css: '' } })
+ok('恢复默认三样都回得去', (await readStateFile()).hero.image === 'meme/俏皮眨眼.png' && (await readStateFile()).hero.css === '')
+
 const m0 = JSON.parse((await get()).body).value
 ok(
   'state 带 stickerSize=96 与空的 customStickers',
@@ -393,6 +498,12 @@ ok(
   upValue.state.customStickers,
 )
 ok('自定义项带上 label / when', upValue.state.customStickers[0].label === '自定的' && upValue.state.customStickers[0].when === '测试用', upValue.state.customStickers[0])
+ok(
+  '清单里包内贴纸都带「包内相对路径」（欢迎页可以直接拿它当形象），改道到包外的自传项没有',
+  upValue.stickers.items.filter((it) => it.custom !== true).every((it) => typeof it.path === 'string' && it.path.startsWith('meme/')) &&
+    upValue.stickers.items.filter((it) => it.custom === true).every((it) => it.path === null),
+  upValue.stickers.items.map((it) => [it.id, it.path]),
+)
 const upFile = makeRes()
 await route.handler(makeReq('GET', `/cyrene/sticker/${upId}`), upFile)
 ok(
@@ -470,6 +581,11 @@ ok(
     it.url === '/cyrene/background/' + encodeURIComponent(it.id)),
   bgList.items[0],
 )
+ok(
+  '背景清单也带 path（照片可以整张拿来当欢迎页形象）',
+  bgList.items.every((it) => typeof it.path === 'string' && it.path.startsWith('Background/')),
+  bgList.items.map((it) => it.path),
+)
 const bgFirst = bgList.items[0]
 const rb2 = makeRes()
 await route.handler(makeReq('GET', `/cyrene/background/${encodeURIComponent(bgFirst.id)}`), rb2)
@@ -490,8 +606,14 @@ const rb5 = await post({ background: { dim: 5, interval: 3, enabled: 'no', curre
 const clampedBg = JSON.parse(rb5.body).value.background
 ok(
   '脏值一律不写进去：dim / interval 收到区间内，非布尔的开关与带路径的文件名保持原样',
-  clampedBg.dim === 0.85 && clampedBg.interval === 15 && clampedBg.enabled === true && clampedBg.current === '',
+  clampedBg.dim === 1 && clampedBg.interval === 15 && clampedBg.enabled === true && clampedBg.current === '',
   clampedBg,
+)
+const rbNeg = await post({ background: { dim: -3 } })
+ok(
+  '淡化现在开放到 0–100%：负数夹回 0（0 就是照片原样、完全不被盖）',
+  JSON.parse(rbNeg.body).value.background.dim === 0,
+  JSON.parse(rbNeg.body).value.background.dim,
 )
 const rb6 = await post({ background: { enabled: false, rotate: true, interval: 120, dim: 0.4, current: bgFirst.name } })
 const goodBg = JSON.parse(rb6.body).value.background
@@ -657,7 +779,7 @@ ok(
 ok('打开文件位置之后文件确实在磁盘上（先落盘再叫窗口）', await readFile(revealValue.path, 'utf8').then(() => true, () => false))
 
 // ── 7h. 世界书：只在有库时挂一行索引；抓取以外的动作都可离线验证
-const WORLDBOOK_FILE = join(home, 'cyrene-worldbook.json')
+const WORLDBOOK_FILE = join(DATA_DIR, 'cyrene-worldbook.json')
 const worldbookFixture = (version) => JSON.stringify({
   schema: 1,
   source: 'https://example.invalid/wiki',
@@ -873,6 +995,133 @@ ok('重启后旧 rev 依然被拒（不会把主题翻回来）', rDStale.status
 const rDOk = makeRes()
 await routeD.handler(makeReq('POST', '/cyrene/state', JSON.stringify({ rev: jD.rev, theme: true })), rDOk)
 ok('带对 rev 的写入照常成功并再自增', rDOk.statusCode === 200 && JSON.parse(rDOk.body).value.rev === jD.rev + 1, rDOk.statusCode)
+
+// ── 10. 老位置 → 新目录的迁移：三个 json 自己搬进 dsh-theme-cyrene/
+// 以前它们直接摊在 $DSH_HOME 根上（和别的插件的文件混在一起）。升级的用户
+// 不该丢人格 / 记忆 / 世界书，所以启动时自动搬一次，搬完老位置就不留了。
+const legacyHome = await mkdtemp(join(tmpdir(), 'cyrene-legacy-'))
+const legacyDir = join(legacyHome, 'dsh-theme-cyrene')
+await writeFile(join(legacyHome, 'cyrene-theme.json'), JSON.stringify({ persona: '老位置的设定', theme: false, rev: 5 }))
+await writeFile(join(legacyHome, 'cyrene-memory.json'), JSON.stringify({
+  enabled: true,
+  rev: 1,
+  items: [{ id: 'mem-legacy-1', text: '老位置的一条记忆', tags: ['旧'], importance: 3, created: '2026-01-01T00:00:00.000Z' }],
+}))
+await writeFile(join(legacyHome, 'cyrene-worldbook.json'), JSON.stringify({
+  source: 'legacy',
+  sourceVersion: 'v1',
+  fetchedAt: '2026-01-01T00:00:00.000Z',
+  entries: [{ id: 'w-001', character: '昔涟', category: 'archive', name: '昔涟 · 档案', keys: ['昔涟'], content: '来自：翁法罗斯　城邦：哀丽秘榭　定位：辅助型角色。昔涟是黄金裔的引导者，也是白厄童年时期的玩伴与同行者。' }],
+}))
+process.env.DSH_HOME = legacyHome
+const mod3 = await import(`${MOD}?migrate=1`)
+const E = makeCtx({ DEPLOYMENT_PERSONA_PREFIX: 0 })
+mod3.apply(E.ctx)
+await tick()
+const routeE = E.routes[0]
+const rE = makeRes()
+await routeE.handler(makeReq('GET', '/cyrene/state'), rE)
+const jE = JSON.parse(rE.body).value
+ok(
+  '升级后 statePath 自动指向 dsh-theme-cyrene/ 里的新位置',
+  jE.statePath === join(legacyDir, 'cyrene-theme.json'),
+  jE.statePath,
+)
+ok(
+  '老位置的设定跟着过来（人格与 rev 都没退回默认）',
+  (E.sections.filter((s) => s.name === 'cyrene:persona').pop()?.text ?? '').startsWith('老位置的设定') && jE.rev === 5,
+  [E.sections.filter((s) => s.name === 'cyrene:persona').pop()?.text?.slice(0, 24), jE.rev],
+)
+const rEMem = makeRes()
+await routeE.handler(makeReq('GET', '/cyrene/memory'), rEMem)
+const memE = JSON.parse(rEMem.body).value
+ok(
+  '记忆也搬了（path 在新目录、条目还在）',
+  memE.path === join(legacyDir, 'cyrene-memory.json') && memE.count === 1,
+  [memE.path, memE.count],
+)
+const rEWb = makeRes()
+await routeE.handler(makeReq('GET', '/cyrene/worldbook'), rEWb)
+const wbE = JSON.parse(rEWb.body).value
+ok(
+  '世界书也搬了（path 在新目录、条目还在）',
+  wbE.path === join(legacyDir, 'cyrene-worldbook.json') && wbE.count === 1,
+  [wbE.path, wbE.count],
+)
+const legacyLeft = []
+for (const name of ['cyrene-theme.json', 'cyrene-memory.json', 'cyrene-worldbook.json']) {
+  try {
+    await stat(join(legacyHome, name))
+    legacyLeft.push(name)
+  } catch {
+    // 搬走了就没有了
+  }
+}
+ok('.dsh 根上不再留那三个文件（是搬走，不是复制）', legacyLeft.length === 0, legacyLeft)
+ok(
+  '新目录里恰好是三份运行时数据',
+  (await readdir(legacyDir)).sort().join(',') === 'cyrene-memory.json,cyrene-theme.json,cyrene-worldbook.json',
+  await readdir(legacyDir),
+)
+// 再挂一次（新实例）不该把已经搬好的东西搬第二遍，也不该回退到默认。
+const mod4 = await import(`${MOD}?migrate=2`)
+const F = makeCtx({ DEPLOYMENT_PERSONA_PREFIX: 0 })
+mod4.apply(F.ctx)
+await tick()
+const rF = makeRes()
+await F.routes[0].handler(makeReq('GET', '/cyrene/state'), rF)
+ok('迁移是幂等的：再启动一次设定还在，不会被清回默认', JSON.parse(rF.body).value.rev === 5 && (F.sections.filter((s) => s.name === 'cyrene:persona').pop()?.text ?? '').startsWith('老位置的设定'))
+
+// 两边都有时不能靠"先到先得"：谁新用谁（老版本还在跑的时候手工搬过、或复制过一份，
+// 都不能让旧数据盖掉新的）。两份都在时，输的那份改成同目录下的 <文件名>.old。
+const bothHome = await mkdtemp(join(tmpdir(), 'cyrene-both-'))
+const bothDir = join(bothHome, 'dsh-theme-cyrene')
+await mkdir(bothDir, { recursive: true })
+await writeFile(join(bothDir, 'cyrene-theme.json'), JSON.stringify({ persona: '目录里的旧版', rev: 2 }))
+await writeFile(join(bothHome, 'cyrene-theme.json'), JSON.stringify({ persona: '根上的新版', rev: 9 }))
+const longAgo = new Date(Date.now() - 60_000)
+await utimes(join(bothDir, 'cyrene-theme.json'), longAgo, longAgo)
+process.env.DSH_HOME = bothHome
+const mod5 = await import(`${MOD}?migrate=3`)
+const G = makeCtx({ DEPLOYMENT_PERSONA_PREFIX: 0 })
+mod5.apply(G.ctx)
+await tick()
+const rG = makeRes()
+await G.routes[0].handler(makeReq('GET', '/cyrene/state'), rG)
+const jG = JSON.parse(rG.body).value
+ok(
+  '两边都有、根上那份更新 → 用根上的（rev 9 没有被目录里的 rev 2 盖掉）',
+  jG.rev === 9 && (G.sections.filter((s) => s.name === 'cyrene:persona').pop()?.text ?? '').startsWith('根上的新版'),
+  [jG.rev],
+)
+ok('.dsh 根上不再留那份（搬过去顶掉）', await missing(join(bothHome, 'cyrene-theme.json')))
+await rm(bothHome, { recursive: true, force: true })
+
+// 反过来：目录里那份更新，就把根上那份改名成 <文件名>.old（不删数据，但根目录干净）
+const bothHome2 = await mkdtemp(join(tmpdir(), 'cyrene-both2-'))
+const bothDir2 = join(bothHome2, 'dsh-theme-cyrene')
+await mkdir(bothDir2, { recursive: true })
+await writeFile(join(bothDir2, 'cyrene-theme.json'), JSON.stringify({ persona: '目录里的新版', rev: 7 }))
+await writeFile(join(bothHome2, 'cyrene-theme.json'), JSON.stringify({ persona: '根上的旧版', rev: 1 }))
+await utimes(join(bothHome2, 'cyrene-theme.json'), longAgo, longAgo)
+process.env.DSH_HOME = bothHome2
+const mod6 = await import(`${MOD}?migrate=4`)
+const H = makeCtx({ DEPLOYMENT_PERSONA_PREFIX: 0 })
+mod6.apply(H.ctx)
+await tick()
+const rH = makeRes()
+await H.routes[0].handler(makeReq('GET', '/cyrene/state'), rH)
+ok(
+  '目录里那份更新时保留它，根上那份改名成 .old 收进目录（.dsh 根上不留东西）',
+  JSON.parse(rH.body).value.rev === 7 &&
+    (await missing(join(bothHome2, 'cyrene-theme.json'))) &&
+    (await readdir(bothDir2)).includes('cyrene-theme.json.old'),
+  await readdir(bothDir2),
+)
+await rm(bothHome2, { recursive: true, force: true })
+
+await rm(legacyHome, { recursive: true, force: true })
+process.env.DSH_HOME = home
 
 await rm(home, { recursive: true, force: true })
 
