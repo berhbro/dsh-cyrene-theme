@@ -1628,6 +1628,39 @@ ok(
   heroOffEl.children.map((c) => c && c.type),
 )
 
+// ── 6e. 冷启动时序：清单先到、状态后到
+// 清单先回来时 state.background.current 还是空串，直接按清单第一张铺会先闪一张
+// 错的图，等状态回来才换成锚点那张。知道该铺哪张之前只能留渐变底。
+const RACE_STATE = { ok: true, value: { ...REVB.value, background: { ...BG_STATE, current: 'b.jpeg' } } }
+const bootRace = await bootstrap((call) => {
+  if (call.url.endsWith('/cyrene/report')) return { status: 200, payload: { ok: true, value: { at: 'now' } } }
+  if (isBackgrounds(call)) return { status: 200, payload: BACKGROUNDS }
+  if (call.method === 'GET') {
+    return new Promise((resolve) => setTimeout(() => resolve({ status: 200, payload: RACE_STATE }), 60))
+  }
+  return { status: 200, payload: RACE_STATE }
+}, { autoHost: true })
+const boxRace = makeCtx()
+bootRace.exports.apply(boxRace.ctx)
+await slow(20)
+const docRace = bootRace.doc
+const layerRace = docRace.body.descendants().find((el) => el.className === 'cyre-bg')
+const activeRace = () => {
+  const img = layerRace?.children.find((el) => el.className === 'cyre-bg-img' && el.attrs['data-active'] === '1')
+  return img === undefined ? '' : String(img.style.backgroundImage)
+}
+ok(
+  '冷启动空窗里只留渐变底，绝不先铺清单第一张（那会闪一张错的图）',
+  docRace.body.attrs['data-cyre-bg'] === 'off' && activeRace() === '',
+  [docRace.body.attrs['data-cyre-bg'], activeRace()],
+)
+await slow(90)
+ok(
+  '状态回来后按锚点铺对那张（b.jpeg，而不是清单第一张 a.jpeg）',
+  docRace.body.attrs['data-cyre-bg'] === 'on' && activeRace().includes('/cyrene/background/b.jpeg'),
+  [docRace.body.attrs['data-cyre-bg'], activeRace()],
+)
+
 console.log(`\n${failures.length === 0 ? 'PASS' : 'FAIL'}  ${passed}/${passed + failures.length}`)
 if (failures.length > 0) {
   console.log(`失败项：${failures.join(' | ')}`)
