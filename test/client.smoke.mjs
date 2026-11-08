@@ -329,32 +329,39 @@ ok(
   !/\[data-sidebar-right-panel\]/.test(blurTargets),
   blurTargets.slice(0, 200),
 )
+// 性能回归：对话区的父级是 [data-dockkit-pane] / [data-dockkit-float]，一旦在上面挂
+// backdrop-filter，拖动历史时模糊会随滚动每帧重新采样 → 明显掉帧（用户实测反馈）。
+// 这两类「会滚动的窗格」必须用半透明底，不许用模糊；侧栏同理（常驻大面）。
 ok(
-  '毛玻璃落在真正的窗格 [data-dockkit-pane] / [data-dockkit-float] 上',
-  /\[data-dockkit-pane\]/.test(blurTargets) && /\[data-dockkit-float\]/.test(blurTargets),
+  '会滚动的窗格不吃 backdrop-filter（滚动历史时不再每帧重采样模糊）',
+  !/\[data-dockkit-pane\]/.test(blurTargets) && !/\[data-dockkit-float\]/.test(blurTargets),
   blurTargets.slice(0, 200),
+)
+ok(
+  '侧栏改用半透明底色代替模糊（常驻大面，模糊收益最小、成本最高）',
+  /\[data-slot="sidebar"\][^{]*\{[^}]*background:linear-gradient/.test(cssText),
 )
 ok(
   'html 画布有不透明兜底（桌面窗口是原生 acrylic）',
   /html:has\(body\[data-dsh-cyrene\]\[data-cyrene-skin="on"\]\)/.test(cssText) && /background-color:#fff8fc/.test(cssText),
 )
-// 回归保护 3：输入框卡片的毛玻璃必须画在静态伪元素上，不能画在卡片自己身上。
-// 卡片的发送键外面套着一个没开 portal 的 Tooltip，气泡是 position:fixed 且靠在
-// ResizeObserver 里反复「适应」视口换边；卡片一旦自己带 backdrop-filter，就成了
-// fixed 后代的包含块，气泡的视口定位被破坏 —— 鼠标停在发送键上（delayMs 500）时
-// 界面就会抖/闪。这条断言把那个坑钉住。
+// 性能回归 2：输入框卡片 sticky 在滚动容器底部，它（或它的伪元素）一旦带
+// backdrop-filter，就等于给每一帧都加一次全宽模糊 —— 拖历史时最贵的一笔。
+// 观感改用「几乎不透明的渐变」代替，别再加回模糊。
 const blurSelectors = [...cssText.matchAll(/([^{}]+)\{([^{}]*backdrop-filter[^{}]*)\}/g)]
   .flatMap((m) => m[1].split(',').map((s) => s.trim()))
 const cardBlur = blurSelectors.filter((s) => s.includes('[data-composer-card]'))
 ok(
-  '卡片的毛玻璃只画在 ::before 上（卡片自己不能成为 fixed 后代的包含块）',
-  cardBlur.length > 0 && cardBlur.every((s) => /\[data-composer-card\]::before/.test(s)),
+  '输入框卡片（含 ::before）不吃 backdrop-filter，改用不透明渐变',
+  cardBlur.length === 0 && /\[data-composer-card\]::before\{[^}]*background:linear-gradient/.test(cssText),
   cardBlur,
 )
-const groupBlur = blurSelectors.filter((s) => /data-slot="sidebar|data-dockkit-pane|data-dockkit-float|role="dialog"|data-radix-popper|data-shell-overlay/.test(s))
+const groupBlur = blurSelectors.filter((s) => /role="dialog"|data-radix-popper|data-shell-overlay|data-slot="sidebar|data-dockkit/.test(s))
 ok(
-  '毛玻璃组齐全，且已经不再挂诊断闸门（面板里的诊断开关取消了）',
-  groupBlur.length >= 7 && groupBlur.every((s) => !s.includes('data-cyre-blur')),
+  '毛玻璃只留在 dialog / 气泡 / 浮层子元素这些小面上，且不再挂诊断闸门',
+  groupBlur.length >= 3 &&
+    groupBlur.every((s) => !s.includes('data-cyre-blur')) &&
+    groupBlur.every((s) => !/data-dockkit|data-slot="sidebar|data-composer-card/.test(s)),
   groupBlur,
 )
 ok(
@@ -758,6 +765,65 @@ ok(
   editorM.querySelector('[data-role="sticker-summary"]').textContent,
 )
 
+// 首屏竞态：清单先到也不能先铺默认第一张。
+{
+  let resolveState
+  const stateGate = new Promise((resolve) => { resolveState = resolve })
+  const race = await bootstrap(async (call) => {
+    if (isBackgrounds(call)) return { status: 200, payload: BACKGROUNDS }
+    if (call.url.endsWith('/cyrene/state') && call.method === 'GET') return await stateGate
+    return { status: 200, payload: REV7 }
+  }, { autoHost: true })
+  const raceBox = makeCtx()
+  race.exports.apply(raceBox.ctx)
+  await tick()
+  const layer = race.doc.body.descendants().find((el) => el.className === 'cyre-bg')
+  const active = () => layer.children.find((el) => el.attrs['data-active'] === '1')
+  ok('清单先到时等待设置，不先铺默认图片', active() === undefined && race.doc.body.attrs['data-cyre-bg'] === 'off')
+  resolveState({ status: 200, payload: { ok: true, value: { ...REV7.value, background: { enabled: true, current: 'b.jpeg', rotate: false, interval: 90, dim: 0.6 } } } })
+  await tick()
+  ok('设置到达后首张直接使用保存的图片', String(active()?.style.backgroundImage).includes('b.jpeg'), active()?.style.backgroundImage)
+}
+
+// 设置请求失败后仍可降级使用默认背景，不能无限等待。
+{
+  let rejectState
+  const stateGate = new Promise((resolve, reject) => { rejectState = reject })
+  const failed = await bootstrap(async (call) => {
+    if (isBackgrounds(call)) return { status: 200, payload: BACKGROUNDS }
+    if (call.url.endsWith('/cyrene/state') && call.method === 'GET') return await stateGate
+    return { status: 200, payload: REV7 }
+  }, { autoHost: true })
+  const failedBox = makeCtx()
+  failed.exports.apply(failedBox.ctx)
+  await tick()
+  rejectState(new Error('模拟状态读取失败'))
+  await tick()
+  const layer = failed.doc.body.descendants().find((el) => el.className === 'cyre-bg')
+  const active = layer.children.find((el) => el.attrs['data-active'] === '1')
+  ok('状态读取失败后回退默认背景', String(active?.style.backgroundImage).includes('a.jpeg'))
+}
+
+// 设置先到时等待清单，再直接显示保存的图片。
+{
+  let resolveList
+  const listGate = new Promise((resolve) => { resolveList = resolve })
+  const first = await bootstrap(async (call) => {
+    if (isBackgrounds(call)) return await listGate
+    if (call.url.endsWith('/cyrene/state') && call.method === 'GET') return { status: 200, payload: { ok: true, value: { ...REV7.value, background: { enabled: true, current: 'b.jpeg', rotate: false, interval: 90, dim: 0.6 } } } }
+    return { status: 200, payload: REV7 }
+  }, { autoHost: true })
+  const firstBox = makeCtx()
+  first.exports.apply(firstBox.ctx)
+  await tick()
+  const layer = first.doc.body.descendants().find((el) => el.className === 'cyre-bg')
+  ok('设置先到时无清单则保持渐变', !layer.children.some((el) => el.attrs['data-active'] === '1'))
+  resolveList({ status: 200, payload: BACKGROUNDS })
+  await tick()
+  const active = layer.children.find((el) => el.attrs['data-active'] === '1')
+  ok('清单到达后使用保存的图片', String(active?.style.backgroundImage).includes('b.jpeg'))
+}
+
 // ── 6d. 背景：清单来自 Background/，控制板管开关 / 选图 / 轮换 / 浓度
 // 这一块最容易出事的不是"图能不能显示"，而是"会不会碍着用"：
 // 图层必须是最底下一层且不吃鼠标，对话列要有一层自己的纸面，
@@ -829,6 +895,13 @@ ok(
   /\[data-cyre-bg="on"\]\{[^}]*--dsw-specific-bubble:/.test(cssText) &&
     /\[data-cyre-bg="on"\] \[data-conversation-scroll\] :is\(p,li,/.test(cssText) &&
     /text-shadow:/.test(cssText),
+)
+// 性能回归 3：正文光晕只留 1px 那层贴边阴影。原来还有一层 0 0 10px 的大半径光晕，
+// 大半径模糊要对每个文字片段单独栅格化，长对话滚起来很吃亏。
+ok(
+  '正文光晕是贴边细阴影，没有大半径（0 0 10px）那一层',
+  !/text-shadow:[^;{}]*0 0 10px/.test(cssText) &&
+    /text-shadow:0 1px 2px/.test(cssText),
 )
 ok(
   '这层处理没有用毛玻璃（滚动容器一旦成为 fixed 子元素的包含块，发送键的浮层会重新闪）',
@@ -1314,6 +1387,7 @@ ok(
     /3\.7/.test(editorWb.querySelector('[data-role="worldbook-note"]').textContent),
   editorWb.querySelector('[data-role="worldbook-note"]').textContent,
 )
+ok('长对话优化无需面板开关，旧设置不会禁用', editorWb.querySelector('[data-role="lightlist"]') === null && editorWb.querySelector('[data-role="measure-scroll"]') === null && /body\[data-dsh-cyrene\] \[data-conversation-scroll\] \[data-chat-flow-key\]\{[^}]*content-visibility:\s*auto/.test(cssText))
 editorWb.dispatch('click', { target: editorWb.querySelector('[data-role="open-worldbook"]') })
 await tick()
 const pageWb = bootWb.doc.body.descendants().find((el) => el.className === 'cyre-overlay cyre-overlay--wide')

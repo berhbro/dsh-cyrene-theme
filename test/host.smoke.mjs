@@ -596,6 +596,8 @@ ok(
   [memGet.statusCode, mem0.count, mem0.enabled, mem0.rev],
 )
 
+ok('空库仍注入记忆使用说明', liveSections(A).some((s) => s.name === 'cyrene:memory' && s.text.includes('cyrene_memory_add')))
+
 const memAdd = makeRes()
 await route.handler(makeReq('POST', '/cyrene/memory', JSON.stringify({ rev: 0, action: 'add', text: '  用户偏好深色主题  ', tags: '偏好, 环境' })), memAdd)
 const memAddValue = JSON.parse(memAdd.body).value
@@ -630,6 +632,8 @@ ok(
   liveSections(A).some((s) => s.name === 'cyrene:memory') === false,
   liveSections(A).map((s) => s.name),
 )
+
+ok('记忆关闭时卸载记忆提示', !liveSections(A).some((s) => s.name === 'cyrene:memory'))
 
 const memBack = makeRes()
 await route.handler(makeReq('POST', '/cyrene/memory', JSON.stringify({ rev: 2, action: 'toggle', enabled: true })), memBack)
@@ -841,6 +845,23 @@ ok(
     /纠正/.test(addTool.description) && /坑/.test(addTool.description),
   addTool?.description,
 )
+const memoryTool = toolsSeen.find((def) => def.name === 'cyrene_memory_add')
+const memorySearchTool = toolsSeen.find((def) => def.name === 'cyrene_memory_search')
+const memoryForgetTool = toolsSeen.find((def) => def.name === 'cyrene_memory_forget')
+const routeT = T.routes[0]
+const memStateT = makeRes()
+await routeT.handler(makeReq('GET', '/cyrene/memory'), memStateT)
+const revT = JSON.parse(memStateT.body).value.rev
+const disableT = makeRes()
+await routeT.handler(makeReq('POST', '/cyrene/memory', JSON.stringify({ rev: revT, action: 'toggle', enabled: false })), disableT)
+const disabledResults = await Promise.all([memoryTool.execute({ text: '禁止写入' }), memorySearchTool.execute({}), memoryForgetTool.execute({ id: 'mem-nonexistent' })])
+ok('关闭时三个记忆工具均拒绝执行', disabledResults.every((r) => r.ok === false && r.error === 'memory-disabled'), disabledResults)
+const afterDisabled = makeRes()
+await routeT.handler(makeReq('GET', '/cyrene/memory'), afterDisabled)
+ok('禁用期间工具调用不改变记忆或版本', JSON.parse(afterDisabled.body).value.rev === revT + 1 && JSON.parse(afterDisabled.body).value.count === JSON.parse(memStateT.body).value.count)
+const enableT = makeRes()
+await routeT.handler(makeReq('POST', '/cyrene/memory', JSON.stringify({ rev: revT + 1, action: 'toggle', enabled: true })), enableT)
+
 const wbHitValue = await wbTool.execute({ query: '昔涟', limit: 1 })
 ok(
   '工具返回的是对象，不是裸字符串（value.text 里放正文）',
