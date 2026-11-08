@@ -104,8 +104,9 @@ function makeRes() {
 }
 
 const readStateFile = async () => JSON.parse(await readFile(STATE_FILE, 'utf8'))
-const lastSection = (box) => box.sections[box.sections.length - 1]
 const liveSections = (box) => box.sections.filter((s) => s.disposed !== true)
+/** 最后一次挂载、且仍然活着的人格 section（记忆 section 会排在它后面）。 */
+const personaSection = (box) => liveSections(box).filter((s) => s.name === 'cyrene:persona').pop()
 
 console.log(`临时 DSH_HOME = ${home}\n`)
 
@@ -115,12 +116,27 @@ const A = makeCtx({ DEPLOYMENT_PERSONA_PREFIX: 0, PLAN_POLICY: 500 })
 apply(A.ctx)
 await tick()
 
-const s0 = lastSection(A)
+const s0 = personaSection(A)
 ok('section 名是 cyrene:persona', s0?.name === 'cyrene:persona', s0?.name)
 ok('order = 部署人格前缀 0 + 100', s0?.order === 100, s0?.order)
 ok('默认底稿含「昔涟」与【口吻】', s0?.text.includes('昔涟') && s0?.text.includes('【口吻】'))
-ok('同一时刻只有一个活着的 section', liveSections(A).length === 1, A.sections.length)
-ok('活着的就是最后挂的那个', liveSections(A)[0] === lastSection(A))
+ok(
+  '同一时刻只有一份活着的人格 section',
+  liveSections(A).filter((s) => s.name === 'cyrene:persona').length === 1,
+  liveSections(A).map((s) => s.name),
+)
+ok('活着的第一份就是人格（记忆随后异步挂上）', liveSections(A)[0] === s0)
+const memory0 = liveSections(A).find((s) => s.name === 'cyrene:memory')
+ok(
+  '0 条记忆时也挂一段常驻提示，模型才知道有记忆这回事、该往哪写',
+  memory0 !== undefined && memory0.text.includes('现在还没有记忆') && memory0.text.includes('cyrene_memory_add'),
+  memory0?.text,
+)
+ok(
+  '人格与记忆 section 都关闭 {{变量}} 插值（2.2 起默认开启，会误伤正文里的花括号）',
+  s0?.interpolate === false && memory0?.interpolate === false,
+  [s0?.interpolate, memory0?.interpolate],
+)
 const route = A.routes[0]
 ok('路由 kind=prefix path=/cyrene', route?.kind === 'prefix' && route?.path === '/cyrene', route)
 
@@ -204,19 +220,19 @@ ok(
 )
 ok(
   '新 section 正文 = 新设定 + 表情包约定',
-  lastSection(A).text.startsWith('测试人格 v2 · TEST') && lastSection(A).text.includes('【表情包】'),
-  lastSection(A).text.slice(0, 40),
+  personaSection(A).text.startsWith('测试人格 v2 · TEST') && personaSection(A).text.includes('【表情包】'),
+  personaSection(A).text.slice(0, 40),
 )
 const persisted2 = await readStateFile()
 ok('新设定已落盘（含 rev）', persisted2.persona === '测试人格 v2 · TEST' && persisted2.rev === 1, persisted2)
 
 // ── 3b. 乐观并发：过期 rev 一律拒绝，状态与 section 都不许动
 const beforeStale = A.sections.length
-const textBeforeStale = lastSection(A).text
+const textBeforeStale = personaSection(A).text
 const rStale = makeRes()
 await route.handler(makeReq('POST', '/cyrene/state', JSON.stringify({ rev: 0, persona: '不该生效' })), rStale)
 ok('过期 rev → 409 stale', rStale.statusCode === 409 && JSON.parse(rStale.body).error.code === 'stale', rStale.statusCode)
-ok('过期写入不改状态、不重挂 section', A.sections.length === beforeStale && lastSection(A).text === textBeforeStale)
+ok('过期写入不改状态、不重挂 section', A.sections.length === beforeStale && personaSection(A).text === textBeforeStale)
 const rStaleGet = makeRes()
 await route.handler(makeReq('GET', '/cyrene/state'), rStaleGet)
 const afterStale = JSON.parse(rStaleGet.body).value
@@ -237,9 +253,9 @@ ok('GET 读到新人格', JSON.parse(r3.body).value.persona === '测试人格 v2
 
 // ── 5. enabled=false / 空白 persona → 交出空字符串（渲染阶段被丢掉）
 const r4 = await post({ enabled: false })
-ok('关闭人格后正文为空', lastSection(A).text === '')
+ok('关闭人格后正文为空', personaSection(A).text === '')
 const r5 = await post({ enabled: true, persona: '   \n  ' })
-ok('空白 persona 正文为空', lastSection(A).text === '')
+ok('空白 persona 正文为空', personaSection(A).text === '')
 
 // ── 6. theme 开关独立于 enabled
 const r6 = await post({ persona: 'ok', theme: false })
@@ -254,7 +270,7 @@ ok('未知路由 404 not-found', r7.statusCode === 404 && JSON.parse(r7.body).er
 const r8 = makeRes()
 await route.handler(makeReq('POST', '/cyrene/state', JSON.stringify({ rev: 99, persona: 'x'.repeat(300 * 1024) })), r8)
 ok('超过 256KB 的请求体被拒（400）', r8.statusCode === 400 && JSON.parse(r8.body).ok === false, r8.statusCode)
-ok('被拒后 section 未被动过', lastSection(A).text.startsWith('ok'))
+ok('被拒后 section 未被动过', personaSection(A).text.startsWith('ok'))
 
 // ── 7b. 活页面取证路由：只存内存的旁路，绝不碰状态与磁盘
 const revBeforeReport = JSON.parse((await get()).body).value.rev
@@ -310,12 +326,12 @@ ok('不认识的表情包 id → 404', rs3.statusCode === 404 && JSON.parse(rs3.
 const rs4 = await post({ stickers: false })
 ok(
   '关掉表情包开关后正文里没有约定',
-  rs4.statusCode === 200 && lastSection(A).text.startsWith('ok') && !lastSection(A).text.includes('【表情包】'),
-  lastSection(A).text.slice(0, 20),
+  rs4.statusCode === 200 && personaSection(A).text.startsWith('ok') && !personaSection(A).text.includes('【表情包】'),
+  personaSection(A).text.slice(0, 20),
 )
 ok('表情包开关已落盘', (await readStateFile()).stickers === false)
 const rs5 = await post({ stickers: true })
-ok('打开后约定又回来了', rs5.statusCode === 200 && lastSection(A).text.includes('【表情包】'))
+ok('打开后约定又回来了', rs5.statusCode === 200 && personaSection(A).text.includes('【表情包】'))
 
 // ── 7d. 欢迎页形象：state.hero + /cyrene/hero 字节路由
 const rh1 = await get()
@@ -401,7 +417,7 @@ ok(
   [upFile.statusCode, upFile.bytes.length],
 )
 ok('自定义条目落盘', (await readStateFile()).customStickers.length === 1)
-ok('人格附录立刻跟上（新贴纸马上能贴）', lastSection(A).text.includes('自定的') && lastSection(A).text.includes('测试用'))
+ok('人格附录立刻跟上（新贴纸马上能贴）', personaSection(A).text.includes('自定的') && personaSection(A).text.includes('测试用'))
 
 const staleUp = makeRes()
 await route.handler(makeReq('POST', '/cyrene/stickers', JSON.stringify({ rev: 1, name: 'x.png', data: 'data:image/png;base64,' + PNG_B64 })), staleUp)
@@ -437,7 +453,7 @@ ok(
 const gone = makeRes()
 await route.handler(makeReq('GET', `/cyrene/sticker/${upId}`), gone)
 ok('文件也从磁盘删掉了', gone.statusCode === 404, gone.statusCode)
-ok('删除已落盘，人格附录里也不再提它', (await readStateFile()).customStickers.length === 0 && !lastSection(A).text.includes('自定的'))
+ok('删除已落盘，人格附录里也不再提它', (await readStateFile()).customStickers.length === 0 && !personaSection(A).text.includes('自定的'))
 const delMissing = makeRes()
 await route.handler(makeReq('POST', '/cyrene/stickers/remove', JSON.stringify({ rev: await revNow(), id: '../../etc/passwd' })), delMissing)
 ok(
@@ -609,10 +625,21 @@ const memToggle = makeRes()
 await route.handler(makeReq('POST', '/cyrene/memory', JSON.stringify({ rev: 1, action: 'toggle', enabled: false })), memToggle)
 const memToggleValue = JSON.parse(memToggle.body).value
 ok('关掉记忆：enabled=false，条目还在（不删数据）', memToggle.statusCode === 200 && memToggleValue.enabled === false && memToggleValue.count === 1, [memToggleValue.enabled, memToggleValue.count])
+ok(
+  '关掉记忆后整段 section 摘掉（数据还在，只是不进提示词）',
+  liveSections(A).some((s) => s.name === 'cyrene:memory') === false,
+  liveSections(A).map((s) => s.name),
+)
 
 const memBack = makeRes()
 await route.handler(makeReq('POST', '/cyrene/memory', JSON.stringify({ rev: 2, action: 'toggle', enabled: true })), memBack)
 ok('再打开：enabled 回来', JSON.parse(memBack.body).value.enabled === true)
+const memoryBack = liveSections(A).find((s) => s.name === 'cyrene:memory')
+ok(
+  '再打开后 section 立刻回来，条目也在',
+  memoryBack !== undefined && memoryBack.text.includes('用户偏好深色主题'),
+  memoryBack?.text,
+)
 
 const memBad = makeRes()
 await route.handler(makeReq('POST', '/cyrene/memory', JSON.stringify({ rev: 3, action: 'nope' })), memBad)
@@ -625,6 +652,12 @@ ok('删一条不存在的 → 404 not-found', memGone.statusCode === 404 && JSON
 const memDel = makeRes()
 await route.handler(makeReq('POST', '/cyrene/memory', JSON.stringify({ rev: await memRev(), action: 'remove', id: memAddValue.items[0].id })), memDel)
 ok('删掉那一条：count 归零', memDel.statusCode === 200 && JSON.parse(memDel.body).value.count === 0, memDel.statusCode)
+const memoryAfterDelete = liveSections(A).find((s) => s.name === 'cyrene:memory')
+ok(
+  '删空之后骨架还在，不是整段消失',
+  memoryAfterDelete !== undefined && memoryAfterDelete.text.includes('现在还没有记忆'),
+  memoryAfterDelete?.text,
+)
 // 原文视图：text/plain，不缓存；内容就是落盘的那份 JSON。
 const rawRes = makeRes()
 await route.handler(makeReq('GET', '/cyrene/memory/raw'), rawRes)
@@ -703,6 +736,10 @@ ok(
 )
 ok('有库时挂上 cyrene:worldbook 这一行索引', liveSections(A).some((spec) => spec.name === 'cyrene:worldbook'))
 ok(
+  '世界书索引同样关闭 {{变量}} 插值（正文里的花括号原样保留）',
+  liveSections(A).find((spec) => spec.name === 'cyrene:worldbook')?.interpolate === false,
+)
+ok(
   '索引 section 排在人格之后、记忆之前（人格 +10）',
   (() => {
     const live = liveSections(A)
@@ -744,7 +781,8 @@ ok('清空：条目归零、文件真的删掉', wbClear.statusCode === 200 && w
 ok('清空之后那行索引 section 也卸掉了', liveSections(A).some((spec) => spec.name === 'cyrene:worldbook') === false)
 ok(
   '清空不影响主题设定与记忆 section',
-  liveSections(A).some((spec) => spec.name === 'cyrene:persona'),
+  liveSections(A).some((spec) => spec.name === 'cyrene:persona') &&
+    liveSections(A).some((spec) => spec.name === 'cyrene:memory'),
   liveSections(A).map((spec) => spec.name),
 )
 
@@ -796,6 +834,13 @@ ok(
   wbTool !== undefined && toolsSeen.some((def) => def.name === 'cyrene_memory_add'),
   toolsSeen.map((def) => def.name),
 )
+const addTool = toolsSeen.find((def) => def.name === 'cyrene_memory_add')
+ok(
+  '记忆工具的描述写明具体触发条件（明确要求 / 稳定偏好 / 纠正 / 踩坑），不只说"值得时"',
+  addTool !== undefined && /记住/.test(addTool.description) && /偏好/.test(addTool.description) &&
+    /纠正/.test(addTool.description) && /坑/.test(addTool.description),
+  addTool?.description,
+)
 const wbHitValue = await wbTool.execute({ query: '昔涟', limit: 1 })
 ok(
   '工具返回的是对象，不是裸字符串（value.text 里放正文）',
@@ -846,21 +891,25 @@ ok('空查询不返回任何条目', matchEntries(wbSample, '   ', 5).length ===
 const B = makeCtx({ DEPLOYMENT_PERSONA: 0 })
 apply(B.ctx)
 await tick()
-ok('旧版 DEPLOYMENT_PERSONA 也得到 100', lastSection(B).order === 100, lastSection(B).order)
+ok('旧版 DEPLOYMENT_PERSONA 也得到 100', personaSection(B).order === 100, personaSection(B).order)
 const C = makeCtx({})
 apply(C.ctx)
 await tick()
-ok('完全不认识这些键时落到 100', lastSection(C).order === 100, lastSection(C).order)
+ok('完全不认识这些键时落到 100', personaSection(C).order === 100, personaSection(C).order)
 
 // ── 9. "重启"：新模块实例只从磁盘读设定（缓存破坏 → 新实例）
 const revBeforeRestart = (await readStateFile()).rev
 const mod2 = await import(`${MOD}?restart=1`)
 const D = makeCtx({ DEPLOYMENT_PERSONA_PREFIX: 0 })
 mod2.apply(D.ctx)
-ok('挂载瞬间用默认底稿', lastSection(D).text.includes('昔涟'))
+ok('挂载瞬间用默认底稿', personaSection(D).text.includes('昔涟'))
 await tick()
-ok('读盘后用文件里的设定覆盖', lastSection(D).text.startsWith('ok'), lastSection(D).text.slice(0, 40))
-ok('第二次挂载同样只有一个活着的 section', liveSections(D).length === 1, D.sections.length)
+ok('读盘后用文件里的设定覆盖', personaSection(D).text.startsWith('ok'), personaSection(D).text.slice(0, 40))
+ok(
+  '第二次挂载同样只有一份活着的人格 section',
+  liveSections(D).filter((s) => s.name === 'cyrene:persona').length === 1,
+  liveSections(D).map((s) => s.name),
+)
 
 const routeD = D.routes[0]
 const rD = makeRes()
