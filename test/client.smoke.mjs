@@ -1122,8 +1122,8 @@ ok(
 const beforeDim = bootB.calls.length
 const bgDimRange = managerB.querySelector('[data-role="bg-dim"]')
 ok(
-  '淡化滑杆开放到 0–100%（步长 5%）',
-  bgDimRange.attrs.min === '0' && bgDimRange.attrs.max === '1' && bgDimRange.attrs.step === '0.05',
+  '淡化滑杆开放到 20–100%（步长 5%）',
+  bgDimRange.attrs.min === '0.2' && bgDimRange.attrs.max === '1' && bgDimRange.attrs.step === '0.05',
   bgDimRange.attrs,
 )
 bgDimRange.value = '0.35'

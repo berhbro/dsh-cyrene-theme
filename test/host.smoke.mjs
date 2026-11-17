@@ -511,8 +511,8 @@ ok(
 )
 const rbNeg = await post({ background: { dim: -3 } })
 ok(
-  '淡化现在开放到 0–100%：负数夹回 0（0 就是照片原样、完全不被盖）',
-  JSON.parse(rbNeg.body).value.background.dim === 0,
+  '淡化下限保持 0.2：负数夹回 0.2（再低正文就压在图上了）',
+  JSON.parse(rbNeg.body).value.background.dim === 0.2,
   JSON.parse(rbNeg.body).value.background.dim,
 )
 const rb6 = await post({ background: { enabled: false, rotate: true, interval: 120, dim: 0.4, current: bgFirst.name } })
