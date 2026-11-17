@@ -119,15 +119,17 @@ function makeDoc() {
   const head = new El('head')
   const body = new El('body')
   body.dataset = {}
+  const listeners = {}
   return {
     baseURI: 'http://127.0.0.1:19387/',
     visibilityState: 'visible',
     head,
     body,
+    listeners,
     createElement(tag) { return new El(tag) },
     querySelectorAll: () => [],
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener(type, fn) { (listeners[type] ??= []).push(fn) },
+    removeEventListener(type, fn) { listeners[type] = (listeners[type] ?? []).filter((f) => f !== fn) },
   }
 }
 
@@ -299,8 +301,8 @@ boot.exports.apply(box.ctx)
 await tick()
 
 ok(
-  '注册了 6 个 effect（样式 / 作用域 / 释放 loader 误标的样式 / 焦点同步 / 背景层 / 活页面取证）',
-  box.effects.length === 6 && box.effects[0].label.endsWith('stylesheet') && box.effects[3].label.endsWith('resync on focus') && box.effects[4].label.endsWith('background layer') && box.effects[5].label.endsWith('dom report'),
+  '注册了 7 个 effect（样式 / 作用域 / 释放 loader 误标的样式 / 焦点同步 / 贴图兜底 / 背景层 / 活页面取证）',
+  box.effects.length === 7 && box.effects[0].label.endsWith('stylesheet') && box.effects[3].label.endsWith('resync on focus') && box.effects[4].label.endsWith('sticker repair') && box.effects[5].label.endsWith('background layer') && box.effects[6].label.endsWith('dom report'),
   box.effects.map((e) => e.label),
 )
 const style = globalThis.document.head.children[0]
@@ -649,6 +651,46 @@ ok(
   editorK2.querySelector('[data-role="stickers"]').checked === false,
   editorK2.querySelector('[data-role="stickers"]').checked,
 )
+
+// ── 6b'. 聊天贴图的兜底：路径写错 / file:// 被拦时改走宿主字节路由
+{
+  const bootRepair = await bootstrap(async (call) => {
+    if (call.url.includes('/cyrene/stickers')) return { status: 200, payload: STICKERS }
+    if (call.url.includes('/cyrene/backgrounds')) return { status: 200, payload: BACKGROUNDS }
+    return { status: 200, payload: REV7 }
+  }, { autoHost: true })
+  const ctxRepair = makeCtx()
+  bootRepair.exports.apply(ctxRepair.ctx)
+  await tick()
+  // 贴图清单是在编辑器首次渲染时拉的：不挂一次编辑器，stickerItems 还是空的。
+  ctxRepair.registered.find((r) => r.registration.id === 'cyrene-theme').component()
+  await tick()
+  const errorListeners = globalThis.document.listeners.error ?? []
+  ok(
+    '在 document 上挂了贴图兜底监听（捕获阶段，能接住渲染层里的 img 失败）',
+    errorListeners.length >= 1,
+    errorListeners.length,
+  )
+  const broken = new El('img')
+  broken.setAttribute('alt', '昔涟·俏皮眨眼')
+  broken.setAttribute('src', 'D:\\dshWorkPlace\\dsh-cyrene-theme\\meme\\俏皮眨眼.jpg')
+  broken.complete = true
+  broken.naturalWidth = 0
+  for (const fn of errorListeners) fn({ target: broken })
+  ok(
+    '加载失败的贴图按 alt 找回 id，改用 /cyrene/sticker/<id>',
+    String(broken.attrs.src).endsWith('/cyrene/sticker/wink'),
+    broken.attrs.src,
+  )
+  ok('只重试一次（打上 data-cyre-sticker-retry）', broken.attrs['data-cyre-sticker-retry'] === '1')
+  for (const fn of errorListeners) fn({ target: broken })
+  ok('重试后仍失败也不会再来一遍（不会死循环）', String(broken.attrs.src).endsWith('/cyrene/sticker/wink'))
+  const stranger = new El('img')
+  stranger.setAttribute('alt', '随便什么图')
+  stranger.setAttribute('src', 'https://example.com/a.png')
+  for (const fn of errorListeners) fn({ target: stranger })
+  ok('不认识的图（alt 不是「昔涟·」）一律不碰', stranger.attrs.src === 'https://example.com/a.png' && stranger.getAttribute('data-cyre-sticker-retry') === null)
+}
 
 // ── 6c. 表情包管理器：一个入口 → 单独一页（大小滑杆 + 自添加 + 删除）
 const STICKERS_CUSTOM = {
@@ -1387,7 +1429,11 @@ ok(
     /3\.7/.test(editorWb.querySelector('[data-role="worldbook-note"]').textContent),
   editorWb.querySelector('[data-role="worldbook-note"]').textContent,
 )
-ok('长对话优化无需面板开关，旧设置不会禁用', editorWb.querySelector('[data-role="lightlist"]') === null && editorWb.querySelector('[data-role="measure-scroll"]') === null && /body\[data-dsh-cyrene\] \[data-conversation-scroll\] \[data-chat-flow-key\]\{[^}]*content-visibility:\s*auto/.test(cssText))
+ok('长对话优化不留面板开关，旧设置也不会禁用', editorWb.querySelector('[data-role="lightlist"]') === null && editorWb.querySelector('[data-role="measure-scroll"]') === null)
+ok(
+  '回归：不许给消息行加 content-visibility（行会变成 fixed 后代的包含块，把「复制/点赞」的浮空提示吃掉）',
+  !/\[data-chat-flow-key\][^{]*\{[^}]*content-visibility/.test(cssText) && !/\[data-chat-flow-key\][^{]*\{[^}]*contain-intrinsic-size/.test(cssText),
+)
 editorWb.dispatch('click', { target: editorWb.querySelector('[data-role="open-worldbook"]') })
 await tick()
 const pageWb = bootWb.doc.body.descendants().find((el) => el.className === 'cyre-overlay cyre-overlay--wide')
