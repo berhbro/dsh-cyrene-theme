@@ -19,5 +19,10 @@ stickers-custom/
 # 面板里上传的背景图（同样是运行时数据；留在包内目录，字节路由才服务得到它）。
 backgrounds-custom/
 
+# 面板里上传的欢迎页形象（同理：运行时数据，覆盖层一次只留一张）。
+hero-custom/
+
 # 截图目录里的备忘笔记：只给自己看，不进仓库（四张 png 照常进）。
 docs/screenshots/README.md
+
+.idea
